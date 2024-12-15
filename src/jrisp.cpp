@@ -1,8 +1,6 @@
 #include "jrisp.hpp"
 #include "utils/json_helpers.hpp"
 #include <cstddef>
-#include <exception>
-#include <limits>
 #include <stdexcept>
 
 typedef std::runtime_error SRE;
@@ -43,7 +41,7 @@ Network::Network(neuro::Network* net, double _min_potential, char leak,
 
     net->make_sorted_node_vector();
 
-    neuron_count = net->sorted_node_vector.size();
+    neuron_count = net->sorted_node_vector.back()->id + 1;
 
     inputs.resize(neuron_count);
     outputs.resize(neuron_count);
@@ -97,8 +95,6 @@ Network::Network(neuro::Network* net, double _min_potential, char leak,
         outgoing_synapse_count[edge->from->id]++;
         synapse_to[edge->from->id].push_back(edge->to->id);
         synapse_delay[edge->from->id].push_back(edge->get("Delay"));
-        printf("Attempting to push back to idx: %d/%zu, the value %f\n",
-               edge->from->id, synapse_weight.size(), edge->get("Delay"));
         synapse_weight[edge->from->id].push_back(edge->get("Weight"));
     }
 }
