@@ -1,1 +1,1 @@
-cat params/risp_f.txt
+cat params/vrisp_7.json

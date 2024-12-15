@@ -1,5 +1,12 @@
-0(A)      INPUT  : 01010
-1(B)      INPUT  : 00110
-2(H_A&~B) HIDDEN : 00100
-3(H_B&~A) HIDDEN : 00010
-4(A^B)    OUTPUT : 00011
+node 4(A^B) spike counts: 0
+node 4(A^B) last fire time: -1.0
+node 4(A^B) spike counts: 0
+node 4(A^B) last fire time: -1.0
+node 4(A^B) spike counts: 0
+node 4(A^B) last fire time: -1.0
+node 4(A^B) spike counts: 1
+node 4(A^B) last fire time: 0.0
+node 4(A^B) spike counts: 1
+node 4(A^B) last fire time: 0.0
+node 4(A^B) spike counts: 0
+node 4(A^B) last fire time: -1.0

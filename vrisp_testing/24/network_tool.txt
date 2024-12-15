@@ -5,7 +5,7 @@ FJ tmp_empty_network.txt
 AN 0 1 2 3 4 
 AI 0 1 2
 AO 3 4
-SNP_ALL Threshold 1
+SNP_ALL Threshold 2
 SETNAME 0 Main
 SETNAME 1 On
 SETNAME 2 Off

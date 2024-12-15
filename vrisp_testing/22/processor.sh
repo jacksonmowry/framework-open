@@ -1,1 +1,1 @@
-sed 's/none/configurable/' params/risp_f.txt
+sed 's/none/configurable/' params/vrisp_7.json

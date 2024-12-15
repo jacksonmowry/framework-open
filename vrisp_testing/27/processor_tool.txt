@@ -1,5 +1,0 @@
-ML tmp_network.txt
-AS 0 0 1
-RUN 10
-GSR
-NCH

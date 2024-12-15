@@ -1,11 +1,41 @@
 ML tmp_network.txt
 AS 0 0 1   2 0 1             
-RUN 10                       
-GSR                        
+RUN 1
+OC
+RUN 1
+OC
+RUN 1
+OC
+RUN 1
+OC
+RUN 1
+OC
+RUN 1
+OC
+RUN 1
+OC
+RUN 1
+OC
+RUN 1
+OC
+RUN 1
+OC
 
 AS 1 0 1   2 0 1             
-RUN 3                        
-GSR                        
+RUN 1
+OC                      
+RUN 1
+OC                      
+RUN 1
+OC                      
 
-RUN 5                        
-GSR
+RUN 1 
+OC
+RUN 1 
+OC
+RUN 1 
+OC
+RUN 1 
+OC
+RUN 1 
+OC

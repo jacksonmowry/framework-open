@@ -7,3 +7,11 @@ lib/*
 
 compile_flags.txt
 .clang-format
+
+tmp_empty_network.txt
+tmp_network.txt
+tmp_nt_output.txt
+tmp_proc_params.txt
+tmp_pt_error.txt
+tmp_pt_input.txt
+tmp_pt_output_txt

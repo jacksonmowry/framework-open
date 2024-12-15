@@ -1,5 +1,11 @@
-0(A)   INPUT  : 01010001010
-1(B)   INPUT  : 01001010010
-2(A|B) OUTPUT : 00101001001
-3(H_A) HIDDEN : 00101000101
-4(H_B) HIDDEN : 00100101001
+node 2(A|B) spike counts: 0
+node 2(A|B) spike counts: 0
+node 2(A|B) spike counts: 1
+node 2(A|B) spike counts: 0
+node 2(A|B) spike counts: 1
+node 2(A|B) spike counts: 0
+node 2(A|B) spike counts: 0
+node 2(A|B) spike counts: 1
+node 2(A|B) spike counts: 0
+node 2(A|B) spike counts: 0
+node 2(A|B) spike counts: 1

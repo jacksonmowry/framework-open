@@ -5,7 +5,7 @@ FJ tmp_empty_network.txt
 AN 0 1 2 3 4 
 AI 0 1 2
 AO 3 4
-SNP_ALL Threshold 1
+SNP_ALL Threshold 2
 SNP 3 Leak 0
 SETNAME 0 Main
 SETNAME 1 On
@@ -17,10 +17,10 @@ SETNAME 4 Bias
 
 AE 1 0 2 0 0 0 0 3  0 4  4 4 
 SEP_ALL Delay 1 
-SEP_ALL Weight 1
-SEP 2 0 Weight -1
+SEP_ALL Weight 2
+SEP 2 0 Weight -2
 
-SEP 0 3 Weight 0.5
+SEP 0 3 Weight 1
 
 # Store
 

@@ -15,7 +15,7 @@
 # the processor interface from include/framework.hpp.  It should be clear how to
 # compile this for a different processor.
 
-CXX = g++
+CXX = clang++
 
 CFLAGS = -g
 FR_LIB = lib/libframework.a

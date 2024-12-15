@@ -86,7 +86,6 @@ Network::Network(neuro::Network* net, double _min_potential, char leak,
     }
 
     for (int i = 0; i < net->num_outputs(); i++) {
-        printf("Adding %d as output %d\n", net->get_output(i)->id, i);
         output_mappings.push_back(net->get_output(i)->id);
     }
 
@@ -98,6 +97,8 @@ Network::Network(neuro::Network* net, double _min_potential, char leak,
         outgoing_synapse_count[edge->from->id]++;
         synapse_to[edge->from->id].push_back(edge->to->id);
         synapse_delay[edge->from->id].push_back(edge->get("Delay"));
+        printf("Attempting to push back to idx: %d/%zu, the value %f\n",
+               edge->from->id, synapse_weight.size(), edge->get("Delay"));
         synapse_weight[edge->from->id].push_back(edge->get("Weight"));
     }
 }
@@ -125,7 +126,8 @@ void Network::apply_spike(const Spike& s, bool normalized) {
 
     uint8_t spike_value = (normalized) ? s.value * spike_value_factor : s.value;
     neuron_charge_buffer[(current_timestep + (size_t)s.time) %
-                         tracked_timesteps_count][s.id] += spike_value;
+                         tracked_timesteps_count][input_mappings[s.id]] +=
+        spike_value;
 }
 
 void Network::run(size_t duration) {
@@ -139,18 +141,13 @@ void Network::run(size_t duration) {
 
     current_timestep += duration;
 
-    // for (size_t i = 0; i < neuron_count; i++) {
-    //     if (neuron_leak[i]) {
-    //         neuron_charge_buffer[current_timestep % tracked_timesteps_count]
-    //                             [i] = 0;
-    //     }
-
-    //     if (neuron_charge_buffer[current_timestep % tracked_timesteps_count]
-    //                             [i] < min_potential) {
-    //         neuron_charge_buffer[current_timestep % tracked_timesteps_count]
-    //                             [i] = min_potential;
-    //     }
-    // }
+    for (size_t i = 0; i < neuron_count; i++) {
+        if (neuron_charge_buffer[current_timestep % tracked_timesteps_count]
+                                [i] < min_potential) {
+            neuron_charge_buffer[current_timestep % tracked_timesteps_count]
+                                [i] = min_potential;
+        }
+    }
 }
 
 void Network::process_events(uint32_t time) {
@@ -163,6 +160,9 @@ void Network::process_events(uint32_t time) {
 #ifdef NO_SIMD
     for (size_t i = 0; i < neuron_charge_buffer[internal_timestep].size();
          i++) {
+        if (neuron_charge_buffer[internal_timestep][i] < min_potential) {
+            neuron_charge_buffer[internal_timestep][i] = min_potential;
+        }
         if (neuron_charge_buffer[internal_timestep][i] >= neuron_threshold[i]) {
             for (size_t j = 0; j < synapse_to[i].size(); j++) {
                 neuron_charge_buffer[(internal_timestep + synapse_delay[i][j]) %
@@ -184,9 +184,12 @@ void Network::process_events(uint32_t time) {
             if (!neuron_leak[i]) {
                 // If we don't leak we carry this charge over into the next
                 // timestep
+                // printf("Not leaking, so I add %d charge to the next timestep,
+                // resulting in")
                 neuron_charge_buffer[(internal_timestep + 1) %
                                      tracked_timesteps_count][i] +=
                     neuron_charge_buffer[internal_timestep][i];
+                neuron_charge_buffer[internal_timestep][i] = 0;
             } else {
                 // Otherwise reset charge to zero
                 neuron_charge_buffer[internal_timestep][i] = 0;

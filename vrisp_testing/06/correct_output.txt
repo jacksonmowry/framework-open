@@ -1,7 +1,40 @@
-0(A)           INPUT  : 0101010100
-1(~A)          INPUT  : 1010101000
-2(B)           INPUT  : 0011001100
-3(~B)          INPUT  : 1100110000
-4(H_(~A)|(~B)) HIDDEN : 0111011100
-5(A&B)         OUTPUT : 0000010001
-6(~(A&B))      OUTPUT : 0011101110
+node 5(A&B) spike counts: 0
+node 6(~(A&B)) spike counts: 0
+node 5(A&B) last fire time: -1.0
+node 6(~(A&B)) last fire time: -1.0
+node 5(A&B) spike counts: 0
+node 6(~(A&B)) spike counts: 0
+node 5(A&B) last fire time: -1.0
+node 6(~(A&B)) last fire time: -1.0
+node 5(A&B) spike counts: 0
+node 6(~(A&B)) spike counts: 1
+node 5(A&B) last fire time: -1.0
+node 6(~(A&B)) last fire time: 0.0
+node 5(A&B) spike counts: 0
+node 6(~(A&B)) spike counts: 1
+node 5(A&B) last fire time: -1.0
+node 6(~(A&B)) last fire time: 0.0
+node 5(A&B) spike counts: 0
+node 6(~(A&B)) spike counts: 1
+node 5(A&B) last fire time: -1.0
+node 6(~(A&B)) last fire time: 0.0
+node 5(A&B) spike counts: 1
+node 6(~(A&B)) spike counts: 0
+node 5(A&B) last fire time: 0.0
+node 6(~(A&B)) last fire time: -1.0
+node 5(A&B) spike counts: 0
+node 6(~(A&B)) spike counts: 1
+node 5(A&B) last fire time: -1.0
+node 6(~(A&B)) last fire time: 0.0
+node 5(A&B) spike counts: 0
+node 6(~(A&B)) spike counts: 1
+node 5(A&B) last fire time: -1.0
+node 6(~(A&B)) last fire time: 0.0
+node 5(A&B) spike counts: 0
+node 6(~(A&B)) spike counts: 1
+node 5(A&B) last fire time: -1.0
+node 6(~(A&B)) last fire time: 0.0
+node 5(A&B) spike counts: 1
+node 6(~(A&B)) spike counts: 0
+node 5(A&B) last fire time: 0.0
+node 6(~(A&B)) last fire time: -1.0

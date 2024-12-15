@@ -1,3 +1,10 @@
-0(A)   INPUT  : 01010
-1(B)   INPUT  : 00110
-2(A|B) OUTPUT : 00111
+node 2(A|B) spike counts: 0
+node 2(A|B) last fire time: -1.0
+node 2(A|B) spike counts: 0
+node 2(A|B) last fire time: -1.0
+node 2(A|B) spike counts: 1
+node 2(A|B) last fire time: 0.0
+node 2(A|B) spike counts: 1
+node 2(A|B) last fire time: 0.0
+node 2(A|B) spike counts: 1
+node 2(A|B) last fire time: 0.0

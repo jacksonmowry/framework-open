@@ -1,2 +1,0 @@
-Node 0 charge: 0.1
-Node 0 charge: 0.6

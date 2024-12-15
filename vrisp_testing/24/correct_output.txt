@@ -1,10 +1,4 @@
-0(Main) INPUT  : 
-1(On)   INPUT  : 
-2(Off)  INPUT  : 
-3(Out)  OUTPUT : 
-4(Bias) OUTPUT : 
-0(Main) INPUT  : 1
-1(On)   INPUT  : 0
-2(Off)  INPUT  : 0
-3(Out)  OUTPUT : 0
-4(Bias) OUTPUT : 0
+node 3(Out) spike counts: 0
+node 4(Bias) spike counts: 0
+node 3(Out) spike counts: 1
+node 4(Bias) spike counts: 1
