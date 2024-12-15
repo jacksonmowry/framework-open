@@ -1,0 +1,2 @@
+node 2(A&B) spike counts: 1
+node 2(A&B) last fire time: 4.0

@@ -4,3 +4,6 @@ obj/*
 !obj/.keep
 lib/*
 !lib/.keep
+
+compile_flags.txt
+.clang-format
