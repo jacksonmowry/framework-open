@@ -1,6 +1,8 @@
 #include "jrisp.hpp"
+#include "utils/alignment_helpers.hpp"
 #include "utils/json_helpers.hpp"
 #include <cstddef>
+#include <immintrin.h>
 #include <stdexcept>
 
 typedef std::runtime_error SRE;
@@ -42,40 +44,47 @@ Network::Network(neuro::Network* net, double _min_potential, char leak,
     net->make_sorted_node_vector();
 
     neuron_count = net->sorted_node_vector.back()->id + 1;
+    size_t allocation_size =
+        ((neuron_count + 31) / 32) *
+        32; // JDM Instead of messing with masking load/stores we can just round
+            // up to a multiple of 32
 
-    inputs.resize(neuron_count);
-    outputs.resize(neuron_count);
+    inputs.resize(allocation_size);
+    outputs.resize(allocation_size);
 
-    neuron_fired.resize(neuron_count);
-    output_fire_count.resize(neuron_count, 0);
-    output_last_fire_timestep.resize(neuron_count, -1);
-    outgoing_synapse_count.resize(neuron_count);
-    neuron_threshold.resize(neuron_count);
-    synapse_to.resize(neuron_count);
-    synapse_delay.resize(neuron_count);
-    synapse_weight.resize(neuron_count);
-    neuron_charge_buffer.resize(tracked_timesteps_count,
-                                vector<int8_t>(neuron_count));
-    neuron_leak.resize(neuron_count);
+    neuron_fired.resize(allocation_size);
+    output_fire_count.resize(allocation_size, 0);
+    output_last_fire_timestep.resize(allocation_size, -1);
+    outgoing_synapse_count.resize(allocation_size);
+    neuron_threshold.resize(allocation_size, INT8_MAX);
+    synapse_to.resize(allocation_size);
+    synapse_delay.resize(allocation_size);
+    synapse_weight.resize(allocation_size);
+    neuron_charge_buffer.resize(
+        tracked_timesteps_count,
+        vector<int8_t, AlignmentAllocator<int8_t>>(allocation_size));
+    neuron_leak.resize(allocation_size);
 
     /* Add neurons */
     for (size_t i = 0; i < net->sorted_node_vector.size(); i++) {
         neuro::Node* node = net->sorted_node_vector[i];
 
+        neuron_mappings.push_back(node->id);
+
         if (leak_mode == 'c') {
-            neuron_leak[i] = (node->get("Leak") != 0);
+            neuron_leak[node->id] = (node->get("Leak") != 0);
         } else {
-            neuron_leak[i] = (leak_mode == 'a');
+            neuron_leak[node->id] = (leak_mode == 'a');
         }
 
-        neuron_threshold[i] = node->get("Threshold");
+        neuron_threshold[node->id] = node->get("Threshold");
 
         if (node->is_input()) {
-            inputs[i] = true;
+            inputs[node->id] = true;
         }
 
         if (node->is_output()) {
-            outputs[i] = true;
+            outputs[node->id] = true;
         }
     }
 
@@ -152,7 +161,7 @@ void Network::process_events(uint32_t time) {
 
     fill(neuron_fired.begin(), neuron_fired.end(), false);
 
-#define NO_SIMD
+#define AVX
 #ifdef NO_SIMD
     for (size_t i = 0; i < neuron_charge_buffer[internal_timestep].size();
          i++) {
@@ -193,6 +202,56 @@ void Network::process_events(uint32_t time) {
         }
     }
 #endif // NO_SIMD
+#ifdef AVX
+    __m256i ones = _mm256_set1_epi8(1);
+    for (size_t i = 0; i < neuron_count; i += 32) {
+        __m256i charges = _mm256_load_si256(
+            (__m256i*)&neuron_charge_buffer[internal_timestep][i]);
+        // Bring up any charges that are less than min_potential
+        __m256i min_potential_vec = _mm256_set1_epi8(min_potential);
+        charges = _mm256_max_epi8(charges, min_potential_vec);
+
+        __m256i threshold = _mm256_load_si256((__m256i*)&neuron_threshold[i]);
+        threshold =
+            _mm256_sub_epi8(threshold,
+                            ones); // There isn't a cmpge instruction on
+                                   // most CPUs (Only suported on AVX-512)
+
+        __m256i fired = _mm256_cmpgt_epi8(charges, threshold);
+
+        bool values[32] __attribute__((aligned(32)));
+        _mm256_store_si256((__m256i*)values, fired);
+
+        for (int k = 0; k < 32 && (i + k) < neuron_count; k++) {
+            if (values[k]) {
+                for (size_t j = 0; j < synapse_to[i + k].size(); j++) {
+                    neuron_charge_buffer[(internal_timestep +
+                                          synapse_delay[i + k][j]) %
+                                         tracked_timesteps_count]
+                                        [synapse_to[i + k][j]] +=
+                        synapse_weight[i + k][j];
+                }
+                neuron_fired[i + k] = true;
+                if (outputs[i + k]) {
+                    output_last_fire_timestep[i + k] = time;
+                    output_fire_count[i + k] =
+                        output_fire_count[i + k] == -1
+                            ? 1
+                            : output_fire_count[i + k] + 1;
+                }
+            } else {
+                if (!neuron_leak[i + k]) {
+                    neuron_charge_buffer[(internal_timestep + 1) %
+                                         tracked_timesteps_count][i + k] +=
+                        neuron_charge_buffer[internal_timestep][i + k];
+                }
+            }
+        }
+    }
+
+    fill(neuron_charge_buffer[internal_timestep].begin(),
+         neuron_charge_buffer[internal_timestep].end(), 0);
+#endif // AVX
 }
 
 double Network::get_time() { return (double)current_timestep; }
@@ -213,6 +272,7 @@ vector<double> Network::output_last_fires() {
 int Network::output_count(int output_id) {
     return output_fire_count[output_mappings[output_id]];
 }
+
 vector<int> Network::output_counts() {
     vector<int> return_vector;
 
@@ -242,13 +302,10 @@ vector<vector<double>> Network::neuron_vectors() {
 vector<double> Network::neuron_charges() {
     vector<double> return_vector;
 
-    for (size_t i = 0;
-         i < neuron_charge_buffer[current_timestep % tracked_timesteps_count]
-                 .size();
-         i++) {
+    for (size_t i = 0; i < neuron_mappings.size(); i++) {
         return_vector.push_back(
             neuron_charge_buffer[current_timestep % tracked_timesteps_count]
-                                [i]);
+                                [neuron_mappings[i]]);
     }
 
     return return_vector;

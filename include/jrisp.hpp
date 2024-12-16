@@ -3,7 +3,9 @@
 #include "framework.hpp"
 #include "nlohmann/json.hpp"
 #include "utils/MOA.hpp"
+#include "utils/alignment_helpers.hpp"
 #include <cstdint>
+#include <immintrin.h>
 #include <map>
 
 using namespace neuro;
@@ -66,25 +68,32 @@ class Network {
 
     vector<size_t> input_mappings;
     vector<size_t> output_mappings;
+    vector<size_t> neuron_mappings;
 
     size_t neuron_count;
     size_t tracked_timesteps_count;
 
-    vector<bool> neuron_fired;     /**< Did this neuron fire on this timestep */
-    vector<int> output_fire_count; /**< Number of fires since last run() call*/
-    vector<double> output_last_fire_timestep; /**< Timestep of last firing for
-                                                 this neuron */
-    vector<uint8_t> outgoing_synapse_count; /**< How many outgoing synapses does
-                                               this neuron have*/
-    vector<float> neuron_threshold;         /**< Neuron's threshold*/
-    vector<vector<uint16_t>>
+    vector<bool, AlignmentAllocator<bool>>
+        neuron_fired; /**< Did this neuron fire on this timestep */
+    vector<int, AlignmentAllocator<int>>
+        output_fire_count; /**< Number of fires since last run() call*/
+    vector<double, AlignmentAllocator<double>> output_last_fire_timestep;
+    /**<
+                 Timestep of last firing for this neuron */
+    vector<uint8_t, AlignmentAllocator<uint8_t>> outgoing_synapse_count; /**<
+               How many outgoing synapses does  this neuron have*/
+    vector<int8_t, AlignmentAllocator<int8_t>>
+        neuron_threshold; /**< Neuron's threshold*/
+    vector<vector<uint16_t, AlignmentAllocator<uint16_t>>>
         synapse_to; /**< Which neuron does this synapse go to*/
-    vector<vector<uint8_t>>
+    vector<vector<uint8_t, AlignmentAllocator<uint8_t>>>
         synapse_delay; /**< How much delay does this synapse have*/
-    vector<vector<uint8_t>> synapse_weight; /**< What is this synapses weight*/
-    vector<vector<int8_t>>
+    vector<vector<uint8_t, AlignmentAllocator<uint8_t>>>
+        synapse_weight; /**< What is this synapses weight*/
+    vector<vector<int8_t, AlignmentAllocator<int8_t>>>
         neuron_charge_buffer; /**< Ring buffer for each neuron*/
-    vector<bool> neuron_leak; /**< Does this neuron leak away it's charge */
+    vector<bool, AlignmentAllocator<bool>>
+        neuron_leak; /**< Does this neuron leak away it's charge */
 
     size_t current_timestep; /**< This is what get_time() returns. */
     double min_potential; /**< At the end of a timestep, pin the charge to this

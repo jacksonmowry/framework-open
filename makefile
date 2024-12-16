@@ -17,7 +17,7 @@
 
 CXX = clang++
 
-CFLAGS = -g
+CFLAGS = -g -mavx2
 FR_LIB = lib/libframework.a
 FR_INC = include/framework.hpp
 FR_CFLAGS = -std=c++11 -Wall -Wextra -Iinclude -Iinclude/utils $(CFLAGS)
