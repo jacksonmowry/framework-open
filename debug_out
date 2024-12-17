@@ -1,6 +1,0 @@
-sed: -e expression #1, char 8: unterminated `s' command
-scripts/test_vrisp.sh: line 46: 296174 Segmentation fault      (core dumped) bin/processor_tool_jrisp < vrisp_testing/$i/processor_tool.txt > tmp_pt_output.txt 2> tmp_pt_error.txt
-Test 35 - A RISP-7 network to approximate sine(x)
-Error: Output does not match the correct output.
-       Output file is tmp_pt_output.txt
-       Correct output file is vrisp_testing/35/correct_output.txt
