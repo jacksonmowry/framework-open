@@ -15,9 +15,9 @@
 # the processor interface from include/framework.hpp.  It should be clear how to
 # compile this for a different processor.
 
-CXX = clang++
+CXX = riscv64-linux-gnu-g++
 
-CFLAGS = -g -mavx2
+CFLAGS = -g -static -march=rv64imafdcv0p7
 FR_LIB = lib/libframework.a
 FR_INC = include/framework.hpp
 FR_CFLAGS = -std=c++11 -Wall -Wextra -Iinclude -Iinclude/utils $(CFLAGS)

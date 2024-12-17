@@ -1,9 +1,20 @@
 #include "jrisp.hpp"
+#include "framework.hpp"
 #include "utils/alignment_helpers.hpp"
 #include "utils/json_helpers.hpp"
+#include <algorithm>
 #include <cstddef>
-#include <immintrin.h>
 #include <stdexcept>
+#define RISCVV
+#ifdef AVX
+#include <immintrin.h>
+#endif
+#ifdef __ARM_NEON
+#include <arm_neon.h>
+#endif
+#ifdef RISCVV
+#include <riscv_vector.h>
+#endif
 
 typedef std::runtime_error SRE;
 using namespace std;
@@ -60,10 +71,11 @@ Network::Network(neuro::Network* net, double _min_potential, char leak,
     synapse_to.resize(allocation_size);
     synapse_delay.resize(allocation_size);
     synapse_weight.resize(allocation_size);
-    neuron_charge_buffer.resize(
-        tracked_timesteps_count,
-        vector<int8_t, AlignmentAllocator<int8_t>>(allocation_size));
-    neuron_leak.resize(allocation_size);
+    neuron_charge_buffer = (int8_t*)aligned_alloc(
+        32, (tracked_timesteps_count * neuron_count + 31) / 32 * 32);
+    memset(neuron_charge_buffer, 0,
+           (tracked_timesteps_count * neuron_count + 31) / 32 * 32);
+    neuron_leak.resize(allocation_size / 8);
 
     /* Add neurons */
     for (size_t i = 0; i < net->sorted_node_vector.size(); i++) {
@@ -72,9 +84,11 @@ Network::Network(neuro::Network* net, double _min_potential, char leak,
         neuron_mappings.push_back(node->id);
 
         if (leak_mode == 'c') {
-            neuron_leak[node->id] = (node->get("Leak") != 0);
+            neuron_leak[node->id / 8] =
+                (1 << (node->id % 8)) & (node->get("Leak") != 0);
         } else {
-            neuron_leak[node->id] = (leak_mode == 'a');
+            neuron_leak[node->id / 8] =
+                (1 << (node->id % 8)) & (leak_mode == 'a');
         }
 
         neuron_threshold[node->id] = node->get("Threshold");
@@ -108,7 +122,7 @@ Network::Network(neuro::Network* net, double _min_potential, char leak,
     }
 }
 
-Network::~Network() {}
+Network::~Network() { free(neuron_charge_buffer); }
 
 void Network::apply_spike(const Spike& s, bool normalized) {
     if (!normalized && !is_integer(s.value)) {
@@ -130,9 +144,10 @@ void Network::apply_spike(const Spike& s, bool normalized) {
     }
 
     uint8_t spike_value = (normalized) ? s.value * spike_value_factor : s.value;
-    neuron_charge_buffer[(current_timestep + (size_t)s.time) %
-                         tracked_timesteps_count][input_mappings[s.id]] +=
-        spike_value;
+    neuron_charge_buffer[((current_timestep + (size_t)s.time) %
+                          tracked_timesteps_count) *
+                             neuron_count +
+                         input_mappings[s.id]] += spike_value;
 }
 
 void Network::run(size_t duration) {
@@ -147,10 +162,12 @@ void Network::run(size_t duration) {
     current_timestep += duration;
 
     for (size_t i = 0; i < neuron_count; i++) {
-        if (neuron_charge_buffer[current_timestep % tracked_timesteps_count]
-                                [i] < min_potential) {
-            neuron_charge_buffer[current_timestep % tracked_timesteps_count]
-                                [i] = min_potential;
+        if (neuron_charge_buffer[(current_timestep % tracked_timesteps_count) *
+                                     neuron_count +
+                                 +i] < min_potential) {
+            neuron_charge_buffer[(current_timestep % tracked_timesteps_count) *
+                                     neuron_count +
+                                 i] = min_potential;
         }
     }
 }
@@ -161,7 +178,6 @@ void Network::process_events(uint32_t time) {
 
     fill(neuron_fired.begin(), neuron_fired.end(), false);
 
-#define AVX
 #ifdef NO_SIMD
     for (size_t i = 0; i < neuron_charge_buffer[internal_timestep].size();
          i++) {
@@ -186,7 +202,7 @@ void Network::process_events(uint32_t time) {
                     output_fire_count[i] == -1 ? 1 : output_fire_count[i] + 1;
             }
         } else {
-            if (!neuron_leak[i]) {
+            if (!(neuron_leak[i / 8]) >> (i % 8) & 1) {
                 // If we don't leak we carry this charge over into the next
                 // timestep
                 // printf("Not leaking, so I add %d charge to the next timestep,
@@ -240,7 +256,7 @@ void Network::process_events(uint32_t time) {
                             : output_fire_count[i + k] + 1;
                 }
             } else {
-                if (!neuron_leak[i + k]) {
+                if (!neuron_leak[(i + k) / 8] >> ((i + k) % 8) & 1) {
                     neuron_charge_buffer[(internal_timestep + 1) %
                                          tracked_timesteps_count][i + k] +=
                         neuron_charge_buffer[internal_timestep][i + k];
@@ -252,6 +268,129 @@ void Network::process_events(uint32_t time) {
     fill(neuron_charge_buffer[internal_timestep].begin(),
          neuron_charge_buffer[internal_timestep].end(), 0);
 #endif // AVX
+#ifdef __ARM_NEON
+    int8x16_t zero_vector = vdupq_n_s8(0);
+
+    for (size_t i = 0; i < neuron_charge_buffer[internal_timestep].size();
+         i += 16) {
+        int8x16_t charges =
+            vld1q_s8(&neuron_charge_buffer[internal_timestep][i]);
+        int8x16_t min_potential_vec = vdupq_n_s8(min_potential);
+
+        charges = vmaxq_s8(charges, min_potential_vec);
+
+        int8x16_t thresholds = vld1q_s8(&neuron_threshold[i]);
+
+        uint8_t fired_arr[16];
+        uint8x16_t fired = vcgeq_s8(charges, thresholds);
+        vst1q_u8(fired_arr, fired);
+
+        for (size_t j = 0; j < 16; j++) {
+            if (!fired_arr[j]) {
+                continue;
+            }
+        }
+    }
+    fill(neuron_charge_buffer[internal_timestep].begin(),
+         neuron_charge_buffer[internal_timestep].end(), 0);
+#endif
+#ifdef RISCVV
+    for (size_t i = 0; i < neuron_count; i += 16) {
+        size_t vector_length = min((size_t)16, neuron_count - i);
+        vint8m1_t zero_vector = __riscv_vmv_v_x_i8m1(0, vector_length);
+
+        vint8m1_t charges = __riscv_vle8_v_i8m1(
+            &neuron_charge_buffer[(internal_timestep * neuron_count) + i],
+            vector_length);
+        vint8m1_t min_potential_vec =
+            __riscv_vmv_v_x_i8m1(min_potential, vector_length);
+        charges =
+            __riscv_vmax_vv_i8m1(charges, min_potential_vec, vector_length);
+        vint8m1_t thresholds =
+            __riscv_vle8_v_i8m1(&neuron_threshold[i], vector_length);
+
+        // for (int z = 0; z < vector_length; z++) {
+        //     printf("Neuron %d %sfire because %d/%d\n", i,
+        //            neuron_charge_buffer[(internal_timestep * neuron_count) +
+        //            i +
+        //                                 z] >= neuron_threshold[i + z]
+        //                ? "does "
+        //                : "does not ",
+        //            neuron_charge_buffer[(internal_timestep * neuron_count) +
+        //            i +
+        //                                 z],
+        //            neuron_threshold[i + z]);
+        // }
+
+        vbool8_t fired =
+            __riscv_vmsge_vv_i8m1_b8(charges, thresholds, vector_length);
+
+        if (leak_mode != 'n') {
+            vbool8_t not_fired = __riscv_vmnot_m_b8(fired, vector_length);
+            vbool8_t leak = __riscv_vlm_v_b8(&neuron_leak[i], vector_length);
+        }
+
+        uint8_t fired_arr[16];
+        __riscv_vsm_v_b8(fired_arr, fired, vector_length);
+        // printf("0b%d%d%d%d_%d%d%d%d\n", fired_arr[0] & 128, fired_arr[0] &
+        // 64,
+        //        fired_arr[0] & 32, fired_arr[0] & 16, fired_arr[0] & 8,
+        //        fired_arr[0] & 4, fired_arr[0] & 2, fired_arr[0] & 1);
+
+        // printf("Neurons fired: ");
+        for (size_t j = 0; j < vector_length; j++) {
+            if (!(fired_arr[j / 8] & (1 << (j % 8)))) {
+                continue;
+            }
+            // printf("%zu ", i + j);
+            neuron_fired[i + j] = true;
+            if (outputs[i + j]) {
+                output_last_fire_timestep[i + j] = time;
+                output_fire_count[i + j] = output_fire_count[i + j] == -1
+                                               ? 1
+                                               : output_fire_count[i + j] + 1;
+            }
+
+            size_t num_outgoing = synapse_to[i + j].size();
+            for (size_t k = 0; k < num_outgoing; k += 16) {
+                size_t vector_length = min((size_t)16, num_outgoing - k);
+
+                vint8m1_t weights = __riscv_vle8_v_i8m1(
+                    &synapse_weight[i + j][k], vector_length);
+                vuint8m1_t delays = __riscv_vle8_v_u8m1(
+                    &synapse_delay[i + j][k], vector_length);
+                vuint16m2_t destinations =
+                    __riscv_vle16_v_u16m2(&synapse_to[i + j][k], vector_length);
+
+                vuint16m2_t indexes = __riscv_vwaddu_vx_u16m2(
+                    delays, (int8_t)internal_timestep, vector_length);
+                indexes = __riscv_vremu_vx_u16m2(
+                    indexes, tracked_timesteps_count, vector_length);
+
+                // vmadd.vx vd, rs1, vs2, vm | vd[i] = (x[rs1] * vd[i]) + vs2[i]
+                indexes =
+                    __riscv_vmadd_vx_u16m2(indexes, (uint16_t)neuron_count,
+                                           destinations, vector_length);
+
+                vint8m1_t downstream_charges = __riscv_vloxei16_v_i8m1(
+                    neuron_charge_buffer, indexes, vector_length);
+
+                downstream_charges = __riscv_vadd_vv_i8m1(
+                    downstream_charges, weights, vector_length);
+
+                __riscv_vsoxei16_v_i8m1(neuron_charge_buffer, indexes,
+                                        downstream_charges, vector_length);
+            }
+        }
+        // putchar('\n');
+        for (size_t z = 0; z < 16 && i + z < neuron_count; z++) {
+            neuron_charge_buffer[internal_timestep * neuron_count + i + z] = 0;
+        }
+    }
+    // memset(&neuron_charge_buffer[(internal_timestep * neuron_count)], 0,
+    //        sizeof(*neuron_charge_buffer) * tracked_timesteps_count *
+    //            neuron_count);
+#endif
 }
 
 double Network::get_time() { return (double)current_timestep; }
@@ -304,8 +443,9 @@ vector<double> Network::neuron_charges() {
 
     for (size_t i = 0; i < neuron_mappings.size(); i++) {
         return_vector.push_back(
-            neuron_charge_buffer[current_timestep % tracked_timesteps_count]
-                                [neuron_mappings[i]]);
+            neuron_charge_buffer[(current_timestep % tracked_timesteps_count) *
+                                     neuron_count +
+                                 neuron_mappings[i]]);
     }
 
     return return_vector;
@@ -330,9 +470,9 @@ void Network::synapse_weights(vector<uint32_t>& pres, vector<uint32_t>& posts,
 }
 
 void Network::clear_activity() {
-    for (size_t i = 0; i < neuron_charge_buffer.size(); i++) {
-        fill(neuron_charge_buffer[i].begin(), neuron_charge_buffer[i].end(), 0);
-    }
+    memset(neuron_charge_buffer, 0,
+           sizeof(*neuron_charge_buffer) * tracked_timesteps_count *
+               neuron_count);
 
     fill(neuron_fired.begin(), neuron_fired.end(), false);
     fill(output_last_fire_timestep.begin(), output_last_fire_timestep.end(),
