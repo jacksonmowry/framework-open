@@ -84,11 +84,10 @@ Network::Network(neuro::Network* net, double _min_potential, char leak,
         neuron_mappings.push_back(node->id);
 
         if (leak_mode == 'c') {
-            neuron_leak[node->id / 8] =
-                (1 << (node->id % 8)) & (node->get("Leak") != 0);
+            neuron_leak[node->id / 8] |= (node->get("Leak") != 0)
+                                         << (node->id % 8);
         } else {
-            neuron_leak[node->id / 8] =
-                (1 << (node->id % 8)) & (leak_mode == 'a');
+            neuron_leak[node->id / 8] |= (leak_mode == 'a') << (node->id % 8);
         }
 
         neuron_threshold[node->id] = node->get("Threshold");
@@ -310,24 +309,49 @@ void Network::process_events(uint32_t time) {
             __riscv_vle8_v_i8m1(&neuron_threshold[i], vector_length);
 
         // for (int z = 0; z < vector_length; z++) {
-        //     printf("Neuron %d %sfire because %d/%d\n", i,
-        //            neuron_charge_buffer[(internal_timestep * neuron_count) +
-        //            i +
-        //                                 z] >= neuron_threshold[i + z]
-        //                ? "does "
-        //                : "does not ",
-        //            neuron_charge_buffer[(internal_timestep * neuron_count) +
-        //            i +
-        //                                 z],
-        //            neuron_threshold[i + z]);
+        //     // printf("Neuron %d %sfire because %d/%d\n", z,
+        //     //        neuron_charge_buffer[(internal_timestep * neuron_count)
+        //     +
+        //     //        i +
+        //     //                             z] >= neuron_threshold[i + z]
+        //     //            ? "does "
+        //     //            : "does not ",
+        //     //        neuron_charge_buffer[(internal_timestep * neuron_count)
+        //     +
+        //     //        i +
+        //     //                             z],
+        //     //        neuron_threshold[i + z]);
         // }
 
         vbool8_t fired =
             __riscv_vmsge_vv_i8m1_b8(charges, thresholds, vector_length);
 
-        if (leak_mode != 'n') {
+        if (leak_mode != 'a') {
             vbool8_t not_fired = __riscv_vmnot_m_b8(fired, vector_length);
-            vbool8_t leak = __riscv_vlm_v_b8(&neuron_leak[i], vector_length);
+            vbool8_t leak = __riscv_vmnot_m_b8(
+                __riscv_vlm_v_b8(&neuron_leak[i / 8], vector_length),
+                vector_length);
+            vbool8_t should_carryover =
+                __riscv_vmand_mm_b8(not_fired, leak, vector_length);
+
+            vint8m1_t next_charges = __riscv_vle8_v_i8m1_m(
+                should_carryover,
+                &neuron_charge_buffer[((internal_timestep + 1) %
+                                       tracked_timesteps_count) *
+                                          neuron_count +
+                                      i],
+                vector_length);
+
+            next_charges =
+                __riscv_vadd_vv_i8m1(next_charges, charges, vector_length);
+
+            __riscv_vse8_v_i8m1_m(
+                should_carryover,
+                &neuron_charge_buffer[((internal_timestep + 1) %
+                                       tracked_timesteps_count) *
+                                          neuron_count +
+                                      i],
+                next_charges, vector_length);
         }
 
         uint8_t fired_arr[16];
@@ -383,13 +407,13 @@ void Network::process_events(uint32_t time) {
             }
         }
         // putchar('\n');
-        for (size_t z = 0; z < 16 && i + z < neuron_count; z++) {
-            neuron_charge_buffer[internal_timestep * neuron_count + i + z] = 0;
-        }
+        // for (size_t z = 0; z < 16 && i + z < neuron_count; z++) {
+        //     neuron_charge_buffer[internal_timestep * neuron_count + i + z] =
+        //     0;
+        // }
     }
-    // memset(&neuron_charge_buffer[(internal_timestep * neuron_count)], 0,
-    //        sizeof(*neuron_charge_buffer) * tracked_timesteps_count *
-    //            neuron_count);
+    memset(&neuron_charge_buffer[(internal_timestep * neuron_count)], 0,
+           sizeof(*neuron_charge_buffer) * neuron_count);
 #endif
 }
 
