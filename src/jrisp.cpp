@@ -5,7 +5,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <stdexcept>
-#define RISCVV
+#define AVX
 #ifdef AVX
 #include <immintrin.h>
 #endif
@@ -178,21 +178,25 @@ void Network::process_events(uint32_t time) {
     fill(neuron_fired.begin(), neuron_fired.end(), false);
 
 #ifdef NO_SIMD
-    for (size_t i = 0; i < neuron_charge_buffer[internal_timestep].size();
-         i++) {
-        if (neuron_charge_buffer[internal_timestep][i] < min_potential) {
-            neuron_charge_buffer[internal_timestep][i] = min_potential;
+    for (size_t i = 0; i < neuron_count; i++) {
+        if (neuron_charge_buffer[internal_timestep * neuron_count + i] <
+            min_potential) {
+            neuron_charge_buffer[internal_timestep * neuron_count + i] =
+                min_potential;
         }
-        if (neuron_charge_buffer[internal_timestep][i] >= neuron_threshold[i]) {
+        if (neuron_charge_buffer[internal_timestep * neuron_count + i] >=
+            neuron_threshold[i]) {
             for (size_t j = 0; j < synapse_to[i].size(); j++) {
-                neuron_charge_buffer[(internal_timestep + synapse_delay[i][j]) %
-                                     tracked_timesteps_count]
-                                    [synapse_to[i][j]] += synapse_weight[i][j];
+                neuron_charge_buffer[((internal_timestep +
+                                       synapse_delay[i][j]) %
+                                      tracked_timesteps_count) *
+                                         neuron_count +
+                                     synapse_to[i][j]] += synapse_weight[i][j];
             }
 
             neuron_fired[i] = true;
             // If a neuron fires it always clears to zero
-            neuron_charge_buffer[internal_timestep][i] = 0;
+            neuron_charge_buffer[internal_timestep * neuron_count + i] = 0;
 
             // Track output count and last fire time
             if (outputs[i]) {
@@ -201,18 +205,20 @@ void Network::process_events(uint32_t time) {
                     output_fire_count[i] == -1 ? 1 : output_fire_count[i] + 1;
             }
         } else {
-            if (!(neuron_leak[i / 8]) >> (i % 8) & 1) {
+            if (!((neuron_leak[i / 8]) >> (i % 8) & 1)) {
                 // If we don't leak we carry this charge over into the next
                 // timestep
                 // printf("Not leaking, so I add %d charge to the next timestep,
                 // resulting in")
                 neuron_charge_buffer[(internal_timestep + 1) %
-                                     tracked_timesteps_count][i] +=
-                    neuron_charge_buffer[internal_timestep][i];
-                neuron_charge_buffer[internal_timestep][i] = 0;
+                                         tracked_timesteps_count *
+                                         neuron_count +
+                                     i] +=
+                    neuron_charge_buffer[internal_timestep * neuron_count + i];
+                neuron_charge_buffer[internal_timestep * neuron_count + i] = 0;
             } else {
                 // Otherwise reset charge to zero
-                neuron_charge_buffer[internal_timestep][i] = 0;
+                neuron_charge_buffer[internal_timestep * neuron_count + i] = 0;
             }
         }
     }
@@ -296,7 +302,6 @@ void Network::process_events(uint32_t time) {
 #ifdef RISCVV
     for (size_t i = 0; i < neuron_count; i += 16) {
         size_t vector_length = min((size_t)16, neuron_count - i);
-        vint8m1_t zero_vector = __riscv_vmv_v_x_i8m1(0, vector_length);
 
         vint8m1_t charges = __riscv_vle8_v_i8m1(
             &neuron_charge_buffer[(internal_timestep * neuron_count) + i],
@@ -308,28 +313,14 @@ void Network::process_events(uint32_t time) {
         vint8m1_t thresholds =
             __riscv_vle8_v_i8m1(&neuron_threshold[i], vector_length);
 
-        // for (int z = 0; z < vector_length; z++) {
-        //     // printf("Neuron %d %sfire because %d/%d\n", z,
-        //     //        neuron_charge_buffer[(internal_timestep * neuron_count)
-        //     +
-        //     //        i +
-        //     //                             z] >= neuron_threshold[i + z]
-        //     //            ? "does "
-        //     //            : "does not ",
-        //     //        neuron_charge_buffer[(internal_timestep * neuron_count)
-        //     +
-        //     //        i +
-        //     //                             z],
-        //     //        neuron_threshold[i + z]);
-        // }
-
         vbool8_t fired =
             __riscv_vmsge_vv_i8m1_b8(charges, thresholds, vector_length);
 
         if (leak_mode != 'a') {
             vbool8_t not_fired = __riscv_vmnot_m_b8(fired, vector_length);
+            // asm volatile ("");
             vbool8_t leak = __riscv_vmnot_m_b8(
-                __riscv_vlm_v_b8(&neuron_leak[i / 8], vector_length),
+                __riscv_vlm_v_b8(&neuron_leak[i], vector_length),
                 vector_length);
             vbool8_t should_carryover =
                 __riscv_vmand_mm_b8(not_fired, leak, vector_length);
@@ -356,17 +347,10 @@ void Network::process_events(uint32_t time) {
 
         uint8_t fired_arr[16];
         __riscv_vsm_v_b8(fired_arr, fired, vector_length);
-        // printf("0b%d%d%d%d_%d%d%d%d\n", fired_arr[0] & 128, fired_arr[0] &
-        // 64,
-        //        fired_arr[0] & 32, fired_arr[0] & 16, fired_arr[0] & 8,
-        //        fired_arr[0] & 4, fired_arr[0] & 2, fired_arr[0] & 1);
-
-        // printf("Neurons fired: ");
         for (size_t j = 0; j < vector_length; j++) {
             if (!(fired_arr[j / 8] & (1 << (j % 8)))) {
                 continue;
             }
-            // printf("%zu ", i + j);
             neuron_fired[i + j] = true;
             if (outputs[i + j]) {
                 output_last_fire_timestep[i + j] = time;
@@ -406,11 +390,6 @@ void Network::process_events(uint32_t time) {
                                         downstream_charges, vector_length);
             }
         }
-        // putchar('\n');
-        // for (size_t z = 0; z < 16 && i + z < neuron_count; z++) {
-        //     neuron_charge_buffer[internal_timestep * neuron_count + i + z] =
-        //     0;
-        // }
     }
     memset(&neuron_charge_buffer[(internal_timestep * neuron_count)], 0,
            sizeof(*neuron_charge_buffer) * neuron_count);

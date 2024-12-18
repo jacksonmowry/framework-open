@@ -16,8 +16,10 @@
 # compile this for a different processor.
 
 CXX = riscv64-linux-gnu-g++
+# CXX = /home/jackson/duo-examples/duo-sdk/riscv64-linux-musl-x86_64/bin/riscv64-unknown-linux-musl-g++
 
-CFLAGS = -g -static -march=rv64imafdcv0p7
+CFLAGS = -g -O0 -static -march=rv64gcv
+# CFLAGS = -g -O0 -march=rv64imafdcv0p7xthead -mcpu=c906fdv -mcmodel=medany -mabi=lp64d -flax-vector-conversions
 FR_LIB = lib/libframework.a
 FR_INC = include/framework.hpp
 FR_CFLAGS = -std=c++11 -Wall -Wextra -Iinclude -Iinclude/utils $(CFLAGS)
