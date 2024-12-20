@@ -3,9 +3,11 @@
 #include "utils/alignment_helpers.hpp"
 #include "utils/json_helpers.hpp"
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <stdexcept>
-#define AVX
+#define RISCVV
 #ifdef AVX
 #include <immintrin.h>
 #endif
@@ -18,6 +20,8 @@
 
 typedef std::runtime_error SRE;
 using namespace std;
+
+chrono::system_clock::duration total_time;
 
 namespace jrisp {
 /** Configurable settings for jrisp */
@@ -55,10 +59,9 @@ Network::Network(neuro::Network* net, double _min_potential, char leak,
     net->make_sorted_node_vector();
 
     neuron_count = net->sorted_node_vector.back()->id + 1;
-    size_t allocation_size =
-        ((neuron_count + 31) / 32) *
-        32; // JDM Instead of messing with masking load/stores we can just round
-            // up to a multiple of 32
+    allocation_size = ((neuron_count + 7) / 8) *
+                      8; // JDM Instead of messing with masking load/stores we
+                         // can just round up to a multiple of 32
 
     inputs.resize(allocation_size);
     outputs.resize(allocation_size);
@@ -66,16 +69,18 @@ Network::Network(neuro::Network* net, double _min_potential, char leak,
     neuron_fired.resize(allocation_size);
     output_fire_count.resize(allocation_size, 0);
     output_last_fire_timestep.resize(allocation_size, -1);
-    outgoing_synapse_count.resize(allocation_size);
-    neuron_threshold.resize(allocation_size, INT8_MAX);
+    outgoing_synapse_count.resize(allocation_size, 0);
+    neuron_threshold.resize(allocation_size, INT32_MAX);
     synapse_to.resize(allocation_size);
     synapse_delay.resize(allocation_size);
     synapse_weight.resize(allocation_size);
-    neuron_charge_buffer = (int8_t*)aligned_alloc(
-        32, (tracked_timesteps_count * neuron_count + 31) / 32 * 32);
+    neuron_charge_buffer = (int32_t*)aligned_alloc(
+        32, sizeof(*neuron_charge_buffer) * tracked_timesteps_count *
+                allocation_size);
     memset(neuron_charge_buffer, 0,
-           (tracked_timesteps_count * neuron_count + 31) / 32 * 32);
-    neuron_leak.resize(allocation_size / 8);
+           sizeof(*neuron_charge_buffer) * tracked_timesteps_count *
+               allocation_size);
+    neuron_leak.resize(allocation_size);
 
     /* Add neurons */
     for (size_t i = 0; i < net->sorted_node_vector.size(); i++) {
@@ -84,10 +89,9 @@ Network::Network(neuro::Network* net, double _min_potential, char leak,
         neuron_mappings.push_back(node->id);
 
         if (leak_mode == 'c') {
-            neuron_leak[node->id / 8] |= (node->get("Leak") != 0)
-                                         << (node->id % 8);
+            neuron_leak[node->id] = node->get("Leak") != 0;
         } else {
-            neuron_leak[node->id / 8] |= (leak_mode == 'a') << (node->id % 8);
+            neuron_leak[node->id] = leak_mode == 'a';
         }
 
         neuron_threshold[node->id] = node->get("Threshold");
@@ -121,7 +125,10 @@ Network::Network(neuro::Network* net, double _min_potential, char leak,
     }
 }
 
-Network::~Network() { free(neuron_charge_buffer); }
+Network::~Network() {
+    free(neuron_charge_buffer);
+    cerr << "Total time: " << total_time.count() << " seconds\n";
+}
 
 void Network::apply_spike(const Spike& s, bool normalized) {
     if (!normalized && !is_integer(s.value)) {
@@ -142,10 +149,11 @@ void Network::apply_spike(const Spike& s, bool normalized) {
                   to_string(tracked_timesteps_count) + ")");
     }
 
-    uint8_t spike_value = (normalized) ? s.value * spike_value_factor : s.value;
+    int32_t spike_value = (normalized) ? s.value * spike_value_factor : s.value;
+
     neuron_charge_buffer[((current_timestep + (size_t)s.time) %
                           tracked_timesteps_count) *
-                             neuron_count +
+                             allocation_size +
                          input_mappings[s.id]] += spike_value;
 }
 
@@ -162,14 +170,87 @@ void Network::run(size_t duration) {
 
     for (size_t i = 0; i < neuron_count; i++) {
         if (neuron_charge_buffer[(current_timestep % tracked_timesteps_count) *
-                                     neuron_count +
+                                     allocation_size +
                                  +i] < min_potential) {
             neuron_charge_buffer[(current_timestep % tracked_timesteps_count) *
-                                     neuron_count +
+                                     allocation_size +
                                  i] = min_potential;
         }
     }
 }
+
+#ifdef AVX
+#define print_i32(prefix, v)                                                   \
+    printf(prefix ": %d %d %d %d %d %d %d %d\n", _mm256_extract_epi32(v, 0),   \
+           _mm256_extract_epi32(v, 1), _mm256_extract_epi32(v, 2),             \
+           _mm256_extract_epi32(v, 3), _mm256_extract_epi32(v, 4),             \
+           _mm256_extract_epi32(v, 5), _mm256_extract_epi32(v, 6),             \
+           _mm256_extract_epi32(v, 7));
+
+#define print_f32(prefix, v)                                                   \
+    do {                                                                       \
+        float thing[8];                                                        \
+        _mm256_store_ps(thing, v);                                             \
+        printf(prefix ": %f %f %f %f %f %f %f %f\n", thing[0], thing[1],       \
+               thing[2], thing[3], thing[4], thing[5], thing[6], thing[7]);    \
+    } while (false);
+
+// Unsafe and sketcky, only using because AVX-2 doesn't have div or rem. smh
+static __m256i avx2_remainder(__m256i a, uint32_t d) {
+    __m256 as_floats = _mm256_cvtepi32_ps(a);
+    as_floats = _mm256_div_ps(as_floats, _mm256_set1_ps((float)d));
+
+    __m256i back_to_int = _mm256_cvttps_epi32(as_floats);
+    back_to_int = _mm256_mullo_epi32(back_to_int, _mm256_set1_epi32(d));
+
+    return _mm256_sub_epi32(a, back_to_int);
+}
+// avx-2 doesn't have a scatter instruction?
+// Scatters 8 32-bit values packed in `values` at the `offsets` supplied
+#define avx2_scatter(dest, values, offsets, mask, scale)                       \
+    {                                                                          \
+        if (_mm256_extract_epi32(mask, 0)) {                                   \
+            int32_t val = _mm256_extract_epi32(values, 0);                     \
+            int32_t offset = _mm256_extract_epi32(offsets, 0);                 \
+            dest[offset * scale] = val;                                        \
+        }                                                                      \
+        if (_mm256_extract_epi32(mask, 1)) {                                   \
+            int32_t val = _mm256_extract_epi32(values, 1);                     \
+            int32_t offset = _mm256_extract_epi32(offsets, 1);                 \
+            dest[offset * scale] = val;                                        \
+        }                                                                      \
+        if (_mm256_extract_epi32(mask, 2)) {                                   \
+            int32_t val = _mm256_extract_epi32(values, 2);                     \
+            int32_t offset = _mm256_extract_epi32(offsets, 2);                 \
+            dest[offset * scale] = val;                                        \
+        }                                                                      \
+        if (_mm256_extract_epi32(mask, 3)) {                                   \
+            int32_t val = _mm256_extract_epi32(values, 3);                     \
+            int32_t offset = _mm256_extract_epi32(offsets, 3);                 \
+            dest[offset * scale] = val;                                        \
+        }                                                                      \
+        if (_mm256_extract_epi32(mask, 4)) {                                   \
+            int32_t val = _mm256_extract_epi32(values, 4);                     \
+            int32_t offset = _mm256_extract_epi32(offsets, 4);                 \
+            dest[offset * scale] = val;                                        \
+        }                                                                      \
+        if (_mm256_extract_epi32(mask, 5)) {                                   \
+            int32_t val = _mm256_extract_epi32(values, 5);                     \
+            int32_t offset = _mm256_extract_epi32(offsets, 5);                 \
+            dest[offset * scale] = val;                                        \
+        }                                                                      \
+        if (_mm256_extract_epi32(mask, 6)) {                                   \
+            int32_t val = _mm256_extract_epi32(values, 6);                     \
+            int32_t offset = _mm256_extract_epi32(offsets, 6);                 \
+            dest[offset * scale] = val;                                        \
+        }                                                                      \
+        if (_mm256_extract_epi32(mask, 7)) {                                   \
+            int32_t val = _mm256_extract_epi32(values, 7);                     \
+            int32_t offset = _mm256_extract_epi32(offsets, 7);                 \
+            dest[offset * scale] = val;                                        \
+        }                                                                      \
+    }
+#endif
 
 void Network::process_events(uint32_t time) {
     size_t internal_timestep =
@@ -177,26 +258,25 @@ void Network::process_events(uint32_t time) {
 
     fill(neuron_fired.begin(), neuron_fired.end(), false);
 
+    auto start = std::chrono::high_resolution_clock::now();
 #ifdef NO_SIMD
     for (size_t i = 0; i < neuron_count; i++) {
-        if (neuron_charge_buffer[internal_timestep * neuron_count + i] <
+        if (neuron_charge_buffer[internal_timestep * allocation_size + i] <
             min_potential) {
-            neuron_charge_buffer[internal_timestep * neuron_count + i] =
+            neuron_charge_buffer[internal_timestep * allocation_size + i] =
                 min_potential;
         }
-        if (neuron_charge_buffer[internal_timestep * neuron_count + i] >=
+        if (neuron_charge_buffer[internal_timestep * allocation_size + i] >=
             neuron_threshold[i]) {
             for (size_t j = 0; j < synapse_to[i].size(); j++) {
                 neuron_charge_buffer[((internal_timestep +
                                        synapse_delay[i][j]) %
                                       tracked_timesteps_count) *
-                                         neuron_count +
+                                         allocation_size +
                                      synapse_to[i][j]] += synapse_weight[i][j];
             }
 
             neuron_fired[i] = true;
-            // If a neuron fires it always clears to zero
-            neuron_charge_buffer[internal_timestep * neuron_count + i] = 0;
 
             // Track output count and last fire time
             if (outputs[i]) {
@@ -205,150 +285,174 @@ void Network::process_events(uint32_t time) {
                     output_fire_count[i] == -1 ? 1 : output_fire_count[i] + 1;
             }
         } else {
-            if (!((neuron_leak[i / 8]) >> (i % 8) & 1)) {
+            if (!neuron_leak[i]) {
                 // If we don't leak we carry this charge over into the next
                 // timestep
-                // printf("Not leaking, so I add %d charge to the next timestep,
-                // resulting in")
                 neuron_charge_buffer[(internal_timestep + 1) %
                                          tracked_timesteps_count *
-                                         neuron_count +
+                                         allocation_size +
                                      i] +=
-                    neuron_charge_buffer[internal_timestep * neuron_count + i];
-                neuron_charge_buffer[internal_timestep * neuron_count + i] = 0;
-            } else {
-                // Otherwise reset charge to zero
-                neuron_charge_buffer[internal_timestep * neuron_count + i] = 0;
+                    neuron_charge_buffer[internal_timestep * allocation_size +
+                                         i];
             }
         }
     }
+
 #endif // NO_SIMD
 #ifdef AVX
-    __m256i ones = _mm256_set1_epi8(1);
-    for (size_t i = 0; i < neuron_count; i += 32) {
-        __m256i charges = _mm256_load_si256(
-            (__m256i*)&neuron_charge_buffer[internal_timestep][i]);
+    const __m256i one = _mm256_setr_epi32(-1, 0, 0, 0, 0, 0, 0, 0);
+    const __m256i two = _mm256_setr_epi32(-1, -1, 0, 0, 0, 0, 0, 0);
+    const __m256i three = _mm256_setr_epi32(-1, -1, -1, 0, 0, 0, 0, 0);
+    const __m256i four = _mm256_setr_epi32(-1, -1, -1, -1, 0, 0, 0, 0);
+    const __m256i five = _mm256_setr_epi32(-1, -1, -1, -1, -1, 0, 0, 0);
+    const __m256i six = _mm256_setr_epi32(-1, -1, -1, -1, -1, -1, 0, 0);
+    const __m256i seven = _mm256_setr_epi32(-1, -1, -1, -1, -1, -1, -1, 0);
+    const __m256i eight = _mm256_setr_epi32(-1, -1, -1, -1, -1, -1, -1, -1);
+    const __m256i masks[] = {one, two, three, four, five, six, seven, eight};
+
+    for (size_t i = 0; i < neuron_count; i += 8) {
+        size_t work_size = min((size_t)8, neuron_count - i);
+        const __m256i ones = _mm256_set1_epi32(1);
+        __m256i charges = _mm256_maskload_epi32(
+            &neuron_charge_buffer[internal_timestep * allocation_size + i],
+            masks[work_size - 1]);
         // Bring up any charges that are less than min_potential
-        __m256i min_potential_vec = _mm256_set1_epi8(min_potential);
-        charges = _mm256_max_epi8(charges, min_potential_vec);
+        const __m256i min_potential_vec = _mm256_set1_epi32(min_potential);
+        charges = _mm256_max_epi32(charges, min_potential_vec);
 
-        __m256i threshold = _mm256_load_si256((__m256i*)&neuron_threshold[i]);
+        __m256i threshold =
+            _mm256_maskload_epi32(&neuron_threshold[i], masks[work_size - 1]);
         threshold =
-            _mm256_sub_epi8(threshold,
-                            ones); // There isn't a cmpge instruction on
-                                   // most CPUs (Only suported on AVX-512)
+            _mm256_sub_epi32(threshold,
+                             ones); // There isn't a cmpge instruction on
+                                    // most CPUs (Only suported on AVX-512)
 
-        __m256i fired = _mm256_cmpgt_epi8(charges, threshold);
-
-        bool values[32] __attribute__((aligned(32)));
-        _mm256_store_si256((__m256i*)values, fired);
-
-        for (int k = 0; k < 32 && (i + k) < neuron_count; k++) {
-            if (values[k]) {
-                for (size_t j = 0; j < synapse_to[i + k].size(); j++) {
-                    neuron_charge_buffer[(internal_timestep +
-                                          synapse_delay[i + k][j]) %
-                                         tracked_timesteps_count]
-                                        [synapse_to[i + k][j]] +=
-                        synapse_weight[i + k][j];
-                }
-                neuron_fired[i + k] = true;
-                if (outputs[i + k]) {
-                    output_last_fire_timestep[i + k] = time;
-                    output_fire_count[i + k] =
-                        output_fire_count[i + k] == -1
-                            ? 1
-                            : output_fire_count[i + k] + 1;
-                }
-            } else {
-                if (!neuron_leak[(i + k) / 8] >> ((i + k) % 8) & 1) {
-                    neuron_charge_buffer[(internal_timestep + 1) %
-                                         tracked_timesteps_count][i + k] +=
-                        neuron_charge_buffer[internal_timestep][i + k];
-                }
-            }
-        }
-    }
-
-    fill(neuron_charge_buffer[internal_timestep].begin(),
-         neuron_charge_buffer[internal_timestep].end(), 0);
-#endif // AVX
-#ifdef __ARM_NEON
-    int8x16_t zero_vector = vdupq_n_s8(0);
-
-    for (size_t i = 0; i < neuron_charge_buffer[internal_timestep].size();
-         i += 16) {
-        int8x16_t charges =
-            vld1q_s8(&neuron_charge_buffer[internal_timestep][i]);
-        int8x16_t min_potential_vec = vdupq_n_s8(min_potential);
-
-        charges = vmaxq_s8(charges, min_potential_vec);
-
-        int8x16_t thresholds = vld1q_s8(&neuron_threshold[i]);
-
-        uint8_t fired_arr[16];
-        uint8x16_t fired = vcgeq_s8(charges, thresholds);
-        vst1q_u8(fired_arr, fired);
-
-        for (size_t j = 0; j < 16; j++) {
-            if (!fired_arr[j]) {
-                continue;
-            }
-        }
-    }
-    fill(neuron_charge_buffer[internal_timestep].begin(),
-         neuron_charge_buffer[internal_timestep].end(), 0);
-#endif
-#ifdef RISCVV
-    for (size_t i = 0; i < neuron_count; i += 16) {
-        size_t vector_length = min((size_t)16, neuron_count - i);
-
-        vint8m1_t charges = __riscv_vle8_v_i8m1(
-            &neuron_charge_buffer[(internal_timestep * neuron_count) + i],
-            vector_length);
-        vint8m1_t min_potential_vec =
-            __riscv_vmv_v_x_i8m1(min_potential, vector_length);
-        charges =
-            __riscv_vmax_vv_i8m1(charges, min_potential_vec, vector_length);
-        vint8m1_t thresholds =
-            __riscv_vle8_v_i8m1(&neuron_threshold[i], vector_length);
-
-        vbool8_t fired =
-            __riscv_vmsge_vv_i8m1_b8(charges, thresholds, vector_length);
+        const __m256i fired = _mm256_cmpgt_epi32(charges, threshold);
 
         if (leak_mode != 'a') {
-            vbool8_t not_fired = __riscv_vmnot_m_b8(fired, vector_length);
-            // asm volatile ("");
-            vbool8_t leak = __riscv_vmnot_m_b8(
-                __riscv_vlm_v_b8(&neuron_leak[i], vector_length),
-                vector_length);
-            vbool8_t should_carryover =
-                __riscv_vmand_mm_b8(not_fired, leak, vector_length);
+            const __m256i not_fired =
+                _mm256_xor_si256(fired, _mm256_set1_epi32(-1));
+            const __m256i no_leak =
+                _mm256_xor_si256(_mm256_load_si256((__m256i*)&neuron_leak[i]),
+                                 _mm256_set1_epi32(-1));
+            const __m256i should_carryover =
+                _mm256_and_si256(not_fired, no_leak);
 
-            vint8m1_t next_charges = __riscv_vle8_v_i8m1_m(
-                should_carryover,
+            __m256i next_charges = _mm256_maskload_epi32(
                 &neuron_charge_buffer[((internal_timestep + 1) %
                                        tracked_timesteps_count) *
-                                          neuron_count +
+                                          allocation_size +
                                       i],
-                vector_length);
+                should_carryover);
+            next_charges = _mm256_add_epi32(next_charges, charges);
 
-            next_charges =
-                __riscv_vadd_vv_i8m1(next_charges, charges, vector_length);
-
-            __riscv_vse8_v_i8m1_m(
-                should_carryover,
+            _mm256_maskstore_epi32(
                 &neuron_charge_buffer[((internal_timestep + 1) %
                                        tracked_timesteps_count) *
-                                          neuron_count +
+                                          allocation_size +
                                       i],
-                next_charges, vector_length);
+                should_carryover, next_charges);
         }
 
-        uint8_t fired_arr[16];
-        __riscv_vsm_v_b8(fired_arr, fired, vector_length);
+        uint32_t values[8] __attribute__((aligned(32)));
+        _mm256_store_si256((__m256i*)values, fired);
+
+        for (size_t j = 0; j < work_size; j += 1) {
+            if (!values[j]) {
+                continue;
+            }
+
+            neuron_fired[i + j] = true;
+            if (outputs[i + j]) {
+                output_last_fire_timestep[i + j] = time;
+                output_fire_count[i + j] = output_fire_count[i + j] == -1
+                                               ? 1
+                                               : output_fire_count[i + j] + 1;
+            }
+
+            const size_t num_outgoing = outgoing_synapse_count[i + j];
+            for (size_t k = 0; k < num_outgoing; k += 8) {
+                const size_t work_size = min((size_t)8, num_outgoing - k);
+                const __m256i weights = _mm256_maskload_epi32(
+                    &synapse_weight[i + j][k], masks[work_size - 1]);
+                const __m256i delays = _mm256_maskload_epi32(
+                    (int32_t*)&synapse_delay[i + j][k], masks[work_size - 1]);
+                const __m256i dests = _mm256_maskload_epi32(
+                    (int32_t*)&synapse_to[i + j][k], masks[work_size - 1]);
+                __m256i indexes = _mm256_add_epi32(
+                    delays, _mm256_set1_epi32(internal_timestep));
+                indexes =
+                    avx2_remainder(indexes, (uint32_t)tracked_timesteps_count);
+
+                // No madd instruction for 32 bit integers :(
+                indexes = _mm256_mullo_epi32(
+                    indexes, _mm256_set1_epi32((int32_t)allocation_size));
+                indexes = _mm256_add_epi32(indexes, dests);
+
+                const __m256i downstream_charges = _mm256_mask_i32gather_epi32(
+                    _mm256_set1_epi32(0), neuron_charge_buffer, indexes,
+                    masks[work_size - 1], 4);
+
+                const __m256i new_downstream_charges =
+                    _mm256_add_epi32(downstream_charges, weights);
+
+                avx2_scatter(neuron_charge_buffer, new_downstream_charges,
+                             indexes, masks[work_size - 1], 1);
+            }
+        }
+    }
+
+#endif // AVX
+#ifdef __ARM_NEON
+
+#endif
+#ifdef RISCVV
+    for (size_t i = 0; i < neuron_count; i += 4) {
+        size_t vector_length = min((size_t)4, neuron_count - i);
+
+        vint32m1_t charges = vle32_v_i32m1(
+            &neuron_charge_buffer[(internal_timestep * allocation_size) + i],
+            vector_length);
+        vint32m1_t min_potential_vec =
+            vmv_v_x_i32m1(min_potential, vector_length);
+        charges = vmax_vv_i32m1(charges, min_potential_vec, vector_length);
+        vint32m1_t thresholds =
+            vle32_v_i32m1(&neuron_threshold[i], vector_length);
+
+        vbool32_t fired =
+            vmsge_vv_i32m1_b32(charges, thresholds, vector_length);
+
+        if (leak_mode != 'a') {
+            vbool32_t not_fired = vmnot_m_b32(fired, vector_length);
+            vuint32m1_t leak = vle32_v_u32m1(&neuron_leak[i], vector_length);
+            vbool32_t no_leak = vmseq_vx_u32m1_b32(leak, 0, vector_length);
+            vbool32_t should_carryover =
+                vmand_mm_b32(not_fired, no_leak, vector_length);
+
+            vint32m1_t next_charges = vle32_v_i32m1_m(
+                should_carryover, vundefined_i32m1(),
+                &neuron_charge_buffer[((internal_timestep + 1) %
+                                       tracked_timesteps_count) *
+                                          allocation_size +
+                                      i],
+                vector_length);
+
+            next_charges = vadd_vv_i32m1(next_charges, charges, vector_length);
+
+            vse32_v_i32m1_m(should_carryover,
+                            &neuron_charge_buffer[((internal_timestep + 1) %
+                                                   tracked_timesteps_count) *
+                                                      allocation_size +
+                                                  i],
+                            next_charges, vector_length);
+        }
+
+        uint32_t fired_arr[4] = {0};
+        vse32_v_u32m1_m(
+            fired, fired_arr, vmv_v_x_u32m1(1, vector_length),
+            vector_length); // Store mask doesn't exist on 0.7 V extension
         for (size_t j = 0; j < vector_length; j++) {
-            if (!(fired_arr[j / 8] & (1 << (j % 8)))) {
+            if (!fired_arr[j]) {
                 continue;
             }
             neuron_fired[i + j] = true;
@@ -359,41 +463,45 @@ void Network::process_events(uint32_t time) {
                                                : output_fire_count[i + j] + 1;
             }
 
-            size_t num_outgoing = synapse_to[i + j].size();
-            for (size_t k = 0; k < num_outgoing; k += 16) {
-                size_t vector_length = min((size_t)16, num_outgoing - k);
+            size_t num_outgoing = outgoing_synapse_count[i + j];
+            for (size_t k = 0; k < num_outgoing; k += 4) {
+                size_t vector_length = min((size_t)4, num_outgoing - k);
 
-                vint8m1_t weights = __riscv_vle8_v_i8m1(
-                    &synapse_weight[i + j][k], vector_length);
-                vuint8m1_t delays = __riscv_vle8_v_u8m1(
-                    &synapse_delay[i + j][k], vector_length);
-                vuint16m2_t destinations =
-                    __riscv_vle16_v_u16m2(&synapse_to[i + j][k], vector_length);
+                vint32m1_t weights =
+                    vle32_v_i32m1(&synapse_weight[i + j][k], vector_length);
+                vuint32m1_t delays =
+                    vle32_v_u32m1(&synapse_delay[i + j][k], vector_length);
+                vuint32m1_t destinations =
+                    vle32_v_u32m1(&synapse_to[i + j][k], vector_length);
 
-                vuint16m2_t indexes = __riscv_vwaddu_vx_u16m2(
-                    delays, (int8_t)internal_timestep, vector_length);
-                indexes = __riscv_vremu_vx_u16m2(
-                    indexes, tracked_timesteps_count, vector_length);
+                vuint32m1_t indexes = vadd_vx_u32m1(
+                    delays, (int32_t)internal_timestep, vector_length);
+                indexes = vremu_vx_u32m1(indexes, tracked_timesteps_count,
+                                         vector_length);
 
                 // vmadd.vx vd, rs1, vs2, vm | vd[i] = (x[rs1] * vd[i]) + vs2[i]
-                indexes =
-                    __riscv_vmadd_vx_u16m2(indexes, (uint16_t)neuron_count,
-                                           destinations, vector_length);
+                indexes = vmadd_vx_u32m1(indexes, (uint32_t)allocation_size,
+                                         destinations, vector_length);
+                indexes = vmul_vx_u32m1(indexes, sizeof(*neuron_charge_buffer),
+                                        vector_length);
 
-                vint8m1_t downstream_charges = __riscv_vloxei16_v_i8m1(
+                vint32m1_t downstream_charges = vloxei32_v_i32m1(
                     neuron_charge_buffer, indexes, vector_length);
 
-                downstream_charges = __riscv_vadd_vv_i8m1(
-                    downstream_charges, weights, vector_length);
+                downstream_charges =
+                    vadd_vv_i32m1(downstream_charges, weights, vector_length);
 
-                __riscv_vsoxei16_v_i8m1(neuron_charge_buffer, indexes,
-                                        downstream_charges, vector_length);
+                vsoxei32_v_i32m1(neuron_charge_buffer, indexes,
+                                 downstream_charges, vector_length);
             }
         }
     }
-    memset(&neuron_charge_buffer[(internal_timestep * neuron_count)], 0,
-           sizeof(*neuron_charge_buffer) * neuron_count);
 #endif
+    auto end = std::chrono::high_resolution_clock::now();
+    memset(&neuron_charge_buffer[(internal_timestep * allocation_size)], 0,
+           sizeof(*neuron_charge_buffer) * allocation_size);
+
+    total_time += end - start;
 }
 
 double Network::get_time() { return (double)current_timestep; }
@@ -447,7 +555,7 @@ vector<double> Network::neuron_charges() {
     for (size_t i = 0; i < neuron_mappings.size(); i++) {
         return_vector.push_back(
             neuron_charge_buffer[(current_timestep % tracked_timesteps_count) *
-                                     neuron_count +
+                                     allocation_size +
                                  neuron_mappings[i]]);
     }
 
@@ -475,7 +583,7 @@ void Network::synapse_weights(vector<uint32_t>& pres, vector<uint32_t>& posts,
 void Network::clear_activity() {
     memset(neuron_charge_buffer, 0,
            sizeof(*neuron_charge_buffer) * tracked_timesteps_count *
-               neuron_count);
+               allocation_size);
 
     fill(neuron_fired.begin(), neuron_fired.end(), false);
     fill(output_last_fire_timestep.begin(), output_last_fire_timestep.end(),

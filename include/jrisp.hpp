@@ -70,32 +70,33 @@ class Network {
     vector<size_t> neuron_mappings;
 
     size_t neuron_count;
+    size_t allocation_size;
     size_t tracked_timesteps_count;
 
-    vector<bool, AlignmentAllocator<bool>>
+    vector<uint8_t, AlignmentAllocator<uint8_t>>
         neuron_fired; /**< Did this neuron fire on this timestep */
     vector<int, AlignmentAllocator<int>>
         output_fire_count; /**< Number of fires since last run() call*/
-    vector<double, AlignmentAllocator<double>> output_last_fire_timestep;
+    vector<int, AlignmentAllocator<int>> output_last_fire_timestep;
     /**<
                  Timestep of last firing for this neuron */
-    vector<uint8_t, AlignmentAllocator<uint8_t>> outgoing_synapse_count; /**<
+    vector<uint32_t, AlignmentAllocator<uint32_t>> outgoing_synapse_count; /**<
                How many outgoing synapses does  this neuron have*/
-    vector<int8_t, AlignmentAllocator<int8_t>>
+    vector<int32_t, AlignmentAllocator<int32_t>>
         neuron_threshold; /**< Neuron's threshold*/
-    vector<vector<uint16_t, AlignmentAllocator<uint16_t>>>
+    vector<vector<uint32_t, AlignmentAllocator<uint32_t>>>
         synapse_to; /**< Which neuron does this synapse go to*/
-    vector<vector<uint8_t, AlignmentAllocator<uint8_t>>>
+    vector<vector<uint32_t, AlignmentAllocator<uint32_t>>>
         synapse_delay; /**< How much delay does this synapse have*/
-    vector<vector<int8_t, AlignmentAllocator<int8_t>>>
-        synapse_weight;           /**< What is this synapses weight*/
-    int8_t* neuron_charge_buffer; /**< Ring buffer for each neuron, this is a 2D
-                                     array, with `tracked_timesteps_count` rows,
-                                     and `neuron_count` cols*/
-    vector<uint8_t, AlignmentAllocator<uint8_t>>
+    vector<vector<int32_t, AlignmentAllocator<int32_t>>>
+        synapse_weight;            /**< What is this synapses weight*/
+    int32_t* neuron_charge_buffer; /**< Ring buffer for each neuron, this is a
+                                     2D array, with `tracked_timesteps_count`
+                                     rows, and `neuron_count` cols*/
+    vector<uint32_t, AlignmentAllocator<uint32_t>>
         neuron_leak; /**< Cannot use vector<bool> as it does not allow direct
-                        access to the backing store, we still still treat that
-                        as 8 bools packed in a single byte*/
+                        access to the backing store, and is implementation
+                        dependent*/
 
     size_t current_timestep; /**< This is what get_time() returns. */
     double min_potential; /**< At the end of a timestep, pin the charge to this

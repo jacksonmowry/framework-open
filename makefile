@@ -15,11 +15,13 @@
 # the processor interface from include/framework.hpp.  It should be clear how to
 # compile this for a different processor.
 
-CXX = riscv64-linux-gnu-g++
-# CXX = /home/jackson/duo-examples/duo-sdk/riscv64-linux-musl-x86_64/bin/riscv64-unknown-linux-musl-g++
+# CXX = clang++
+# CXX = riscv64-linux-gnu-g++
+CXX = /home/jackson/duo-examples/duo-sdk/riscv64-linux-musl-x86_64/bin/riscv64-unknown-linux-musl-g++
 
-CFLAGS = -g -O0 -static -march=rv64gcv
-# CFLAGS = -g -O0 -march=rv64imafdcv0p7xthead -mcpu=c906fdv -mcmodel=medany -mabi=lp64d -flax-vector-conversions
+# CFLAGS = -g -mavx2 -O3
+# CFLAGS = -g -O0 -static -march=rv64gcv
+CFLAGS = -O3 -march=rv64imafdcv0p7xthead -mcpu=c906fdv -mcmodel=medany -mabi=lp64d
 FR_LIB = lib/libframework.a
 FR_INC = include/framework.hpp
 FR_CFLAGS = -std=c++11 -Wall -Wextra -Iinclude -Iinclude/utils $(CFLAGS)
