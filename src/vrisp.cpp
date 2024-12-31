@@ -160,13 +160,17 @@ void Network::run(size_t duration) {
 
     current_timestep += duration;
 
-    for (size_t i = 0; i < neuron_count; i++) {
-        if (neuron_charge_buffer[(current_timestep % tracked_timesteps_count) *
-                                     allocation_size +
-                                 +i] < min_potential) {
-            neuron_charge_buffer[(current_timestep % tracked_timesteps_count) *
-                                     allocation_size +
-                                 i] = min_potential;
+    if (min_potential != 0 && leak_mode != 'n') {
+        for (size_t i = 0; i < neuron_count; i++) {
+            if (neuron_charge_buffer[(current_timestep %
+                                      tracked_timesteps_count) *
+                                         allocation_size +
+                                     +i] < min_potential) {
+                neuron_charge_buffer[(current_timestep %
+                                      tracked_timesteps_count) *
+                                         allocation_size +
+                                     i] = min_potential;
+            }
         }
     }
 }
