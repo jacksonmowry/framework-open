@@ -1,6 +1,5 @@
 #include "framework.hpp"
 #include "utils/json_helpers.hpp"
-#include <bits/chrono.h>
 #include <chrono>
 #include <cstddef>
 #include <cstdio>

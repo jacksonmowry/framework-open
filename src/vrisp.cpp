@@ -124,7 +124,7 @@ Network::~Network() {
 
 void Network::apply_spike(const Spike& s, bool normalized) {
     if (!normalized && !is_integer(s.value)) {
-        throw SRE("vrisp::Network::apply_spike() only supports integer spike "
+        throw SRE("vrisp::Network::apply_spike() only supports integer spike"
                   "values - value (" +
                   to_string(s.value) + ") is not valid.");
     }
@@ -160,17 +160,13 @@ void Network::run(size_t duration) {
 
     current_timestep += duration;
 
-    if (min_potential != 0 && leak_mode != 'n') {
-        for (size_t i = 0; i < neuron_count; i++) {
-            if (neuron_charge_buffer[(current_timestep %
-                                      tracked_timesteps_count) *
-                                         allocation_size +
-                                     +i] < min_potential) {
-                neuron_charge_buffer[(current_timestep %
-                                      tracked_timesteps_count) *
-                                         allocation_size +
-                                     i] = min_potential;
-            }
+    for (size_t i = 0; i < neuron_count; i++) {
+        if (neuron_charge_buffer[(current_timestep % tracked_timesteps_count) *
+                                     allocation_size +
+                                 +i] < min_potential) {
+            neuron_charge_buffer[(current_timestep % tracked_timesteps_count) *
+                                     allocation_size +
+                                 i] = min_potential;
         }
     }
 }
@@ -181,14 +177,13 @@ void Network::process_events(uint32_t time) {
 
     fill(neuron_fired.begin(), neuron_fired.end(), false);
 
-    // auto start = std::chrono::high_resolution_clock::now();
 #ifdef NO_SIMD
     for (size_t i = 0; i < neuron_count; i++) {
-        if (neuron_charge_buffer[internal_timestep * allocation_size + i] <
-            min_potential) {
-            neuron_charge_buffer[internal_timestep * allocation_size + i] =
-                min_potential;
-        }
+        neuron_charge_buffer[internal_timestep * allocation_size + i] =
+            neuron_charge_buffer[internal_timestep * allocation_size + i] <
+                    min_potential
+                ? min_potential
+                : neuron_charge_buffer[internal_timestep * allocation_size + i];
         if (neuron_charge_buffer[internal_timestep * allocation_size + i] >=
             neuron_threshold[i]) {
             for (size_t j = 0; j < synapse_to[i].size(); j++) {
@@ -315,9 +310,6 @@ void Network::process_events(uint32_t time) {
         }
     }
 #endif
-    // auto end = std::chrono::high_resolution_clock::now();
-    // total_time += end - start;
-
     memset(&neuron_charge_buffer[(internal_timestep * allocation_size)], 0,
            sizeof(*neuron_charge_buffer) * allocation_size);
 }
