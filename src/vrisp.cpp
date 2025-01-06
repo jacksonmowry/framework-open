@@ -172,18 +172,20 @@ void Network::run(size_t duration) {
 }
 
 void Network::process_events(uint32_t time) {
+
     size_t internal_timestep =
         (current_timestep + time) % tracked_timesteps_count;
 
     fill(neuron_fired.begin(), neuron_fired.end(), false);
 
+    // auto start = std::chrono::high_resolution_clock::now();
 #ifdef NO_SIMD
     for (size_t i = 0; i < neuron_count; i++) {
-        neuron_charge_buffer[internal_timestep * allocation_size + i] =
-            neuron_charge_buffer[internal_timestep * allocation_size + i] <
-                    min_potential
-                ? min_potential
-                : neuron_charge_buffer[internal_timestep * allocation_size + i];
+        if (neuron_charge_buffer[internal_timestep * allocation_size + i] <
+            min_potential) {
+            neuron_charge_buffer[internal_timestep * allocation_size + i] =
+                min_potential;
+        }
         if (neuron_charge_buffer[internal_timestep * allocation_size + i] >=
             neuron_threshold[i]) {
             for (size_t j = 0; j < synapse_to[i].size(); j++) {
@@ -261,55 +263,34 @@ void Network::process_events(uint32_t time) {
                 next_charges, vector_length);
         }
 
-        uint8_t fired_arr[16] = {0};
+        uint8_t fired_arr[16];
         __riscv_vse8_v_u8m1_m(
             fired, fired_arr, __riscv_vmv_v_x_u8m1(1, vector_length),
             vector_length); // Store mask doesn't exist on 0.7 V extension
+        memcpy(neuron_fired.data() + i, fired_arr, sizeof(fired_arr));
         for (size_t j = 0; j < vector_length; j++) {
             if (!fired_arr[j]) {
                 continue;
             }
-            neuron_fired[i + j] = true;
             if (outputs[i + j]) {
                 output_last_fire_timestep[i + j] = time;
                 output_fire_count[i + j]++;
             }
 
-            size_t num_outgoing = synapse_to[i + j].size();
-            for (size_t k = 0; k < num_outgoing; k += 16) {
-                size_t vector_length = min((size_t)16, num_outgoing - k);
-
-                vint8m1_t weights = __riscv_vle8_v_i8m1(
-                    &synapse_weight[i + j][k], vector_length);
-                vuint8m1_t delays = __riscv_vle8_v_u8m1(
-                    &synapse_delay[i + j][k], vector_length);
-                vuint16m2_t destinations =
-                    __riscv_vle16_v_u16m2(&synapse_to[i + j][k], vector_length);
-
-                vuint16m2_t indexes = __riscv_vwaddu_vx_u16m2(
-                    delays, (uint16_t)internal_timestep, vector_length);
-                indexes = __riscv_vremu_vx_u16m2(
-                    indexes, tracked_timesteps_count, vector_length);
-
-                // vmadd.vx vd, rs1, vs2, vm | vd[i] = (x[rs1] * vd[i]) + vs2[i]
-                indexes =
-                    __riscv_vmadd_vx_u16m2(indexes, (uint16_t)allocation_size,
-                                           destinations, vector_length);
-                vuint32m4_t final_indexes = __riscv_vwmulu_vx_u32m4(
-                    indexes, sizeof(*neuron_charge_buffer), vector_length);
-
-                vint8m1_t downstream_charges = __riscv_vloxei32_v_i8m1(
-                    neuron_charge_buffer, final_indexes, vector_length);
-
-                downstream_charges = __riscv_vadd_vv_i8m1(
-                    downstream_charges, weights, vector_length);
-
-                __riscv_vsuxei32_v_i8m1(neuron_charge_buffer, final_indexes,
-                                        downstream_charges, vector_length);
+            for (size_t k = 0; k < synapse_to[i + j].size(); k++) {
+                neuron_charge_buffer[((internal_timestep +
+                                       synapse_delay[i + j][k]) %
+                                      tracked_timesteps_count) *
+                                         allocation_size +
+                                     synapse_to[i + j][k]] +=
+                    synapse_weight[i + j][k];
             }
         }
     }
 #endif
+    // auto end = std::chrono::high_resolution_clock::now();
+    // total_time += end - start;
+
     memset(&neuron_charge_buffer[(internal_timestep * allocation_size)], 0,
            sizeof(*neuron_charge_buffer) * allocation_size);
 }

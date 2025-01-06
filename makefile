@@ -17,8 +17,10 @@
 
 # CXX ?= g++
 # CFLAGS = -O3 -march=native
-CXX = /home/jackson/duo-examples/duo-sdk/riscv64-linux-musl-x86_64/bin/riscv64-unknown-linux-musl-g++
-CFLAGS = -mcpu=c906fdv -march=rv64imafdcv0p7xthead -mcmodel=medany -mabi=lp64d -O3
+# CXX = /home/jackson/duo-examples/duo-sdk/riscv64-linux-musl-x86_64/bin/riscv64-unknown-linux-musl-g++
+# CFLAGS = -mcpu=c906fdv -march=rv64imafdcv0p7xthead -mcmodel=medany -mabi=lp64d -O3
+CXX = riscv64-unknown-linux-gnu-clang++
+CFLAGS = -march=rv64gcv -Ofast
 
 FR_LIB = lib/libframework.a
 FR_INC = include/framework.hpp

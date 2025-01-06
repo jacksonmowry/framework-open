@@ -63,7 +63,7 @@ int main(int argc, char* argv[]) {
     std::chrono::duration<double, std::ratio<1>> d =
         std::chrono::duration<double, std::ratio<1>>::zero();
 
-    for (int frames = 0; frames < 60; frames++) {
+    for (int frames = 0; frames < 6; frames++) {
         chrono::time_point<chrono::steady_clock> tp =
             chrono::steady_clock::now();
         for (int outer = 0; outer < 340; outer++) {
@@ -86,5 +86,5 @@ int main(int argc, char* argv[]) {
     }
 
     printf("Total frame time:   %7.5f\n", d.count());
-    printf("Average frame time: %7.5f\n", d.count() / 60.0);
+    printf("Average frame time: %7.5f\n", d.count() / 6.0);
 }
