@@ -2,6 +2,7 @@
 #include "utils/json_helpers.hpp"
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -48,11 +49,16 @@ Network* load_network(Processor** pp, const json& network_json) {
 }
 
 int main(int argc, char* argv[]) {
-    if (argc != 2) {
-        fprintf(stderr, "usage: %s network_json\n", argv[0]);
+    if (argc != 3) {
+        fprintf(stderr, "usage: %s network_json activity_denom\n", argv[0]);
+        exit(1);
     }
     json network_json;
     vector<string> json_source = {argv[1]};
+    int activity_denom = stoi(argv[2]);
+    if (activity_denom == 0) {
+        activity_denom = INT32_MAX;
+    }
 
     ifstream fin(argv[1]);
     fin >> network_json;
@@ -68,9 +74,9 @@ int main(int argc, char* argv[]) {
             chrono::steady_clock::now();
         for (int outer = 0; outer < 340; outer++) {
             for (int i = 0; i < n->num_inputs(); i++) {
-                // if (rand() % 3 == 0) {
-                p->apply_spike(Spike(i, 0, 1));
-                // }
+                if (rand() % activity_denom == 0) {
+                    p->apply_spike(Spike(i, 0, 1));
+                }
             }
 
             p->run(1);

@@ -19,7 +19,7 @@
 # CFLAGS = -O3 -march=native
 # CXX = /home/jackson/duo-examples/duo-sdk/riscv64-linux-musl-x86_64/bin/riscv64-unknown-linux-musl-g++
 # CFLAGS = -mcpu=c906fdv -march=rv64imafdcv0p7xthead -mcmodel=medany -mabi=lp64d -O3
-CXX = riscv64-unknown-linux-gnu-clang++
+CXX = riscv64-unknown-linux-gnu-g++
 CFLAGS = -march=rv64gcv -Ofast
 
 FR_LIB = lib/libframework.a
@@ -32,13 +32,15 @@ RISP_OBJ = obj/risp.o obj/risp_static.o
 
 VRISP_INC = include/vrisp.hpp
 VRISP_OBJ = obj/vrisp.o obj/vrisp_static.o
+VRISP_RVV_OBJ = obj/vrisp_rvv.o obj/vrisp_static.o
 
 all: lib/libframework.a \
      bin/network_tool \
      bin/processor_tool_risp \
 	 bin/processor_tool_vrisp \
 	 bin/dbscan_app_risp \
-	 bin/dbscan_app_vrisp
+	 bin/dbscan_app_vrisp \
+	 bin/dbscan_app_vrisp_vector
 
 utils: bin/property_pack_tool \
        bin/property_tool
@@ -69,6 +71,9 @@ bin/dbscan_app_risp: src/dbscan_app.cpp $(FR_INC) $(RISP_INC) $(RISP_OBJ) $(FR_L
 bin/dbscan_app_vrisp: src/dbscan_app.cpp $(FR_INC) $(VRISP_INC) $(VRISP_OBJ) $(FR_LIB)
 	$(CXX) $(FR_CFLAGS) -o bin/dbscan_app_vrisp src/dbscan_app.cpp $(VRISP_OBJ) $(FR_LIB)
 
+bin/dbscan_app_vrisp_vector: src/dbscan_app.cpp $(FR_INC) $(VRISP_INC) $(VRISP_RVV_OBJ) $(FR_LIB)
+	$(CXX) $(FR_CFLAGS) -o bin/dbscan_app_vrisp_vector src/dbscan_app.cpp $(VRISP_RVV_OBJ) $(FR_LIB)
+
 # ------------------------------------------------------------ 
 # Utilities.
 
@@ -88,7 +93,10 @@ obj/risp_static.o: src/risp_static.cpp $(FR_INC) $(RISP_INC)
 	$(CXX) -c $(FR_CFLAGS) -o obj/risp_static.o src/risp_static.cpp
 
 obj/vrisp.o: src/vrisp.cpp $(FR_INC) $(VRISP_INC)
-	$(CXX) -c $(FR_CFLAGS) -o obj/vrisp.o src/vrisp.cpp
+	$(CXX) -c $(FR_CFLAGS) -DNO_SIMD -o obj/vrisp.o src/vrisp.cpp
+
+obj/vrisp_rvv.o: src/vrisp.cpp $(FR_INC) $(VRISP_INC)
+	$(CXX) -c $(FR_CFLAGS) -DRISCVV -o obj/vrisp_rvv.o src/vrisp.cpp
 
 obj/vrisp_static.o: src/vrisp_static.cpp $(FR_INC) $(VRISP_INC)
 	$(CXX) -c $(FR_CFLAGS) -o obj/vrisp_static.o src/vrisp_static.cpp
