@@ -218,71 +218,60 @@ void Network::process_events(uint32_t time) {
 
 #endif // NO_SIMD
 #ifdef RISCVV
-    for (size_t i = 0; i < neuron_count; i += 16) {
-        size_t vector_length = min((size_t)16, neuron_count - i);
-
-        vint8m1_t charges = __riscv_vle8_v_i8m1(
-            &neuron_charge_buffer[(internal_timestep * allocation_size) + i],
-            vector_length);
-        vint8m1_t min_potential_vec =
-            __riscv_vmv_v_x_i8m1(min_potential, vector_length);
-        charges =
-            __riscv_vmax_vv_i8m1(charges, min_potential_vec, vector_length);
-        vint8m1_t thresholds =
-            __riscv_vle8_v_i8m1(&neuron_threshold[i], vector_length);
-
-        vbool8_t fired =
-            __riscv_vmsge_vv_i8m1_b8(charges, thresholds, vector_length);
-
-        if (leak_mode != 'a') {
-            vbool8_t not_fired = __riscv_vmnot_m_b8(fired, vector_length);
-            vuint8m1_t leak =
-                __riscv_vle8_v_u8m1(&neuron_leak[i], vector_length);
-            vbool8_t no_leak = __riscv_vmseq_vx_u8m1_b8(leak, 0, vector_length);
-            vbool8_t should_carryover =
-                __riscv_vmand_mm_b8(not_fired, no_leak, vector_length);
-
-            vint8m1_t next_charges = __riscv_vle8_v_i8m1_m(
-                should_carryover,
-                &neuron_charge_buffer[((internal_timestep + 1) %
-                                       tracked_timesteps_count) *
-                                          allocation_size +
-                                      i],
-                vector_length);
-
-            next_charges =
-                __riscv_vadd_vv_i8m1(next_charges, charges, vector_length);
-
-            __riscv_vse8_v_i8m1_m(
-                should_carryover,
-                &neuron_charge_buffer[((internal_timestep + 1) %
-                                       tracked_timesteps_count) *
-                                          allocation_size +
-                                      i],
-                next_charges, vector_length);
+    for (size_t i = 0; i < neuron_count; i += 1) {
+        if (neuron_charge_buffer[internal_timestep * allocation_size + i] <
+            min_potential) {
+            neuron_charge_buffer[internal_timestep * allocation_size + i] =
+                min_potential;
         }
-
-        uint8_t fired_arr[16];
-        __riscv_vse8_v_u8m1_m(
-            fired, fired_arr, __riscv_vmv_v_x_u8m1(1, vector_length),
-            vector_length); // Store mask doesn't exist on 0.7 V extension
-        memcpy(neuron_fired.data() + i, fired_arr, sizeof(fired_arr));
-        for (size_t j = 0; j < vector_length; j++) {
-            if (!fired_arr[j]) {
-                continue;
-            }
-            if (outputs[i + j]) {
-                output_last_fire_timestep[i + j] = time;
-                output_fire_count[i + j]++;
+        if (neuron_charge_buffer[internal_timestep * allocation_size + i] >=
+            neuron_threshold[i]) {
+            if (outputs[i]) {
+                output_last_fire_timestep[i] = time;
+                output_fire_count[i]++;
             }
 
-            for (size_t k = 0; k < synapse_to[i + j].size(); k++) {
-                neuron_charge_buffer[((internal_timestep +
-                                       synapse_delay[i + j][k]) %
-                                      tracked_timesteps_count) *
+            size_t num_outgoing = synapse_to[i].size();
+            for (size_t k = 0; k < num_outgoing; k += 16) {
+                size_t vector_length = min((size_t)16, num_outgoing - k);
+
+                vint8m1_t weights =
+                    __riscv_vle8_v_i8m1(&synapse_weight[i][k], vector_length);
+                vuint8m1_t delays =
+                    __riscv_vle8_v_u8m1(&synapse_delay[i][k], vector_length);
+                vuint16m2_t destinations =
+                    __riscv_vle16_v_u16m2(&synapse_to[i][k], vector_length);
+
+                vuint16m2_t indexes = __riscv_vwaddu_vx_u16m2(
+                    delays, (uint16_t)internal_timestep, vector_length);
+                indexes = __riscv_vremu_vx_u16m2(
+                    indexes, tracked_timesteps_count, vector_length);
+
+                // vmadd.vx dv, rs1, vs2, vm | vd[i] = (x[rs1] * vd[i]) + vs2[i]
+                indexes =
+                    __riscv_vmadd_vx_u16m2(indexes, (uint16_t)allocation_size,
+                                           destinations, vector_length);
+                vuint32m4_t final_indexes = __riscv_vwmulu_vx_u32m4(
+                    indexes, sizeof(*neuron_charge_buffer), vector_length);
+
+                vint8m1_t downstream_charges = __riscv_vluxei32_v_i8m1(
+                    neuron_charge_buffer, final_indexes, vector_length);
+                downstream_charges = __riscv_vadd_vv_i8m1(
+                    downstream_charges, weights, vector_length);
+
+                __riscv_vsuxei32_v_i8m1(neuron_charge_buffer, final_indexes,
+                                        downstream_charges, vector_length);
+            }
+        } else {
+            // If we don't leak we carry this charge over into the next
+            // timestep
+            if (!neuron_leak[i]) {
+                neuron_charge_buffer[(internal_timestep + 1) %
+                                         tracked_timesteps_count *
                                          allocation_size +
-                                     synapse_to[i + j][k]] +=
-                    synapse_weight[i + j][k];
+                                     i] +=
+                    neuron_charge_buffer[internal_timestep * allocation_size +
+                                         i];
             }
         }
     }

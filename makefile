@@ -19,7 +19,7 @@
 # CFLAGS = -O3 -march=native
 # CXX = /home/jackson/duo-examples/duo-sdk/riscv64-linux-musl-x86_64/bin/riscv64-unknown-linux-musl-g++
 # CFLAGS = -mcpu=c906fdv -march=rv64imafdcv0p7xthead -mcmodel=medany -mabi=lp64d -O3
-CXX = riscv64-unknown-linux-gnu-g++
+CXX = riscv64-linux-gnu-g++
 CFLAGS = -march=rv64gcv -Ofast
 
 FR_LIB = lib/libframework.a
@@ -38,6 +38,7 @@ all: lib/libframework.a \
      bin/network_tool \
      bin/processor_tool_risp \
 	 bin/processor_tool_vrisp \
+     bin/processor_tool_vrisp_vector \
 	 bin/dbscan_app_risp \
 	 bin/dbscan_app_vrisp \
 	 bin/dbscan_app_vrisp_vector
@@ -64,6 +65,9 @@ bin/processor_tool_risp: src/processor_tool.cpp $(FR_INC) $(RISP_INC) $(RISP_OBJ
 
 bin/processor_tool_vrisp: src/processor_tool.cpp $(FR_INC) $(VRISP_INC) $(VRISP_OBJ) $(FR_LIB)
 	$(CXX) $(FR_CFLAGS) -o bin/processor_tool_vrisp src/processor_tool.cpp $(VRISP_OBJ) $(FR_LIB)
+
+bin/processor_tool_vrisp_vector: src/processor_tool.cpp $(FR_INC) $(VRISP_INC) $(VRISP_RVV_OBJ) $(FR_LIB)
+	$(CXX) $(FR_CFLAGS) -o bin/processor_tool_vrisp_vector src/processor_tool.cpp $(VRISP_RVV_OBJ) $(FR_LIB)
 
 bin/dbscan_app_risp: src/dbscan_app.cpp $(FR_INC) $(RISP_INC) $(RISP_OBJ) $(FR_LIB)
 	$(CXX) $(FR_CFLAGS) -o bin/dbscan_app_risp src/dbscan_app.cpp $(RISP_OBJ) $(FR_LIB)
