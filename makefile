@@ -27,6 +27,7 @@ RISP_OBJ = obj/risp.o obj/risp_static.o
 
 VRISP_INC = include/vrisp.hpp
 VRISP_OBJ = obj/vrisp.o obj/vrisp_static.o
+VRISP_SWAR_OBJ = obj/vrisp_swar.o obj/vrisp_static.o
 VRISP_RVV_FULL_OBJ = obj/vrisp_rvv_full.o obj/vrisp_static.o
 VRISP_RVV_FIRED_OBJ = obj/vrisp_rvv_fired.o obj/vrisp_static.o
 VRISP_RVV_SYNAPSES_OBJ = obj/vrisp_rvv_synapses.o obj/vrisp_static.o
@@ -35,6 +36,7 @@ all: lib/libframework.a \
      bin/network_tool \
      bin/processor_tool_risp \
      bin/processor_tool_vrisp \
+     bin/processor_tool_vrisp_swar
 
 riscv_vector: all \
               bin/processor_tool_vrisp_vector_full \
@@ -63,6 +65,9 @@ bin/processor_tool_risp: src/processor_tool.cpp $(FR_INC) $(RISP_INC) $(RISP_OBJ
 
 bin/processor_tool_vrisp: src/processor_tool.cpp $(FR_INC) $(VRISP_INC) $(VRISP_OBJ) $(FR_LIB)
 	$(CXX) $(FR_CFLAGS) -o bin/processor_tool_vrisp src/processor_tool.cpp $(VRISP_OBJ) $(FR_LIB)
+
+bin/processor_tool_vrisp_swar: src/processor_tool.cpp $(FR_INC) $(VRISP_INC) $(VRISP_SWAR_OBJ) $(FR_LIB)
+	$(CXX) $(FR_CFLAGS) -o bin/processor_tool_vrisp_swar src/processor_tool.cpp $(VRISP_SWAR_OBJ) $(FR_LIB)
 
 bin/processor_tool_vrisp_vector_full: src/processor_tool.cpp $(FR_INC) $(VRISP_INC) $(VRISP_RVV_FULL_OBJ) $(FR_LIB)
 	$(CXX) $(FR_CFLAGS) -o bin/processor_tool_vrisp_vector_full src/processor_tool.cpp $(VRISP_RVV_FULL_OBJ) $(FR_LIB)
@@ -93,6 +98,9 @@ obj/risp_static.o: src/risp_static.cpp $(FR_INC) $(RISP_INC)
 
 obj/vrisp.o: src/vrisp.cpp $(FR_INC) $(VRISP_INC)
 	$(CXX) -c $(FR_CFLAGS) -DNO_SIMD -o obj/vrisp.o src/vrisp.cpp
+
+obj/vrisp_swar.o: src/vrisp.cpp $(FR_INC) $(VRISP_INC)
+	$(CXX) -c $(FR_CFLAGS) -DSWAR -o obj/vrisp_swar.o src/vrisp.cpp
 
 obj/vrisp_rvv_full.o: src/vrisp.cpp $(FR_INC) $(VRISP_INC)
 	$(CXX) -c $(FR_CFLAGS) -DRISCVV_FULL -o obj/vrisp_rvv_full.o src/vrisp.cpp
