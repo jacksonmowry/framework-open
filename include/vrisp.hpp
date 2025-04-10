@@ -74,8 +74,8 @@ class Network {
     vector<vector<uint8_t, AlignmentAllocator<uint8_t>>>
         synapse_delay; /**< How much delay does this synapse have*/
     vector<vector<int8_t, AlignmentAllocator<int8_t>>>
-        synapse_weight;           /**< What is this synapses weight*/
-    int8_t* neuron_charge_buffer; /**< Ring buffer for each neuron, this is a
+        synapse_weight;            /**< What is this synapses weight*/
+    int16_t* neuron_charge_buffer; /**< Ring buffer for each neuron, this is a
                                      2D array, with `tracked_timesteps_count`
                                      rows, and `neuron_count` cols*/
     vector<uint8_t, AlignmentAllocator<uint8_t>>
