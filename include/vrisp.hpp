@@ -10,6 +10,7 @@
 using namespace neuro;
 using namespace std;
 namespace vrisp {
+typedef _Float16 float16_t;
 class Network;
 class Processor;
 
@@ -67,15 +68,16 @@ class Network {
     vector<int8_t, AlignmentAllocator<int8_t>> output_last_fire_timestep;
     /**<
                  Timestep of last firing for this neuron */
-    vector<int8_t, AlignmentAllocator<int8_t>>
+
+    vector<float16_t, AlignmentAllocator<float16_t>>
         neuron_threshold; /**< Neuron's threshold*/
     vector<vector<uint16_t, AlignmentAllocator<uint16_t>>>
         synapse_to; /**< Which neuron does this synapse go to*/
     vector<vector<uint8_t, AlignmentAllocator<uint8_t>>>
         synapse_delay; /**< How much delay does this synapse have*/
-    vector<vector<int8_t, AlignmentAllocator<int8_t>>>
-        synapse_weight;           /**< What is this synapses weight*/
-    int8_t* neuron_charge_buffer; /**< Ring buffer for each neuron, this is a
+    vector<vector<float16_t, AlignmentAllocator<float16_t>>>
+        synapse_weight;              /**< What is this synapses weight*/
+    float16_t* neuron_charge_buffer; /**< Ring buffer for each neuron, this is a
                                      2D array, with `tracked_timesteps_count`
                                      rows, and `neuron_count` cols*/
     vector<uint8_t, AlignmentAllocator<uint8_t>>
