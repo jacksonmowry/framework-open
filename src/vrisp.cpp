@@ -232,30 +232,30 @@ void Network::process_events(uint32_t time) {
 
 #endif // NO_SIMD
 #ifdef RISCVV_FULL
-    const size_t max_vector_length = __riscv_vsetvlmax_e8m1();
+    const size_t max_vector_length = __riscv_vsetvlmax_e16m1();
     for (size_t i = 0; i < neuron_count; i += max_vector_length) {
         size_t vector_length = min(max_vector_length, neuron_count - i);
 
-        vint8m1_t charges = __riscv_vle8_v_i8m1(
+        vfloat16m1_t charges = __riscv_vle16_v_f16m1(
             &neuron_charge_buffer[(internal_timestep * allocation_size) + i],
             vector_length);
-        vint8m1_t min_potential_vec =
-            __riscv_vmv_v_x_i8m1(min_potential, vector_length);
+        vfloat16m1_t min_potential_vec =
+            __riscv_vfmv_v_f_f16m1(min_potential, vector_length);
         charges =
-            __riscv_vmax_vv_i8m1(charges, min_potential_vec, vector_length);
-        vint8m1_t thresholds =
-            __riscv_vle8_v_i8m1(&neuron_threshold[i], vector_length);
+            __riscv_vfmax_vv_f16m1(charges, min_potential_vec, vector_length);
+        vfloat16m1_t thresholds =
+            __riscv_vle16_v_f16m1(&neuron_threshold[i], vector_length);
 
-        vbool8_t fired =
-            __riscv_vmsge_vv_i8m1_b8(charges, thresholds, vector_length);
+        vbool16_t fired =
+            __riscv_vmfge_vv_f16m1_b16(charges, thresholds, vector_length);
 
         if (leak_mode != 'a') {
-            vbool8_t leak =
-                __riscv_vlm_v_b8(&neuron_leak[i / 8], vector_length);
-            vbool8_t should_carryover =
-                __riscv_vmnor_mm_b8(fired, leak, vector_length);
+            vbool16_t leak =
+                __riscv_vlm_v_b16(&neuron_leak[i / 8], vector_length);
+            vbool16_t should_carryover =
+                __riscv_vmnor_mm_b16(fired, leak, vector_length);
 
-            vint8m1_t next_charges = __riscv_vle8_v_i8m1_m(
+            vfloat16m1_t next_charges = __riscv_vle16_v_f16m1_m(
                 should_carryover,
                 &neuron_charge_buffer[((internal_timestep + 1) %
                                        tracked_timesteps_count) *
@@ -264,9 +264,9 @@ void Network::process_events(uint32_t time) {
                 vector_length);
 
             next_charges =
-                __riscv_vadd_vv_i8m1(next_charges, charges, vector_length);
+                __riscv_vfadd_vv_f16m1(next_charges, charges, vector_length);
 
-            __riscv_vse8_v_i8m1_m(
+            __riscv_vse16_v_f16m1_m(
                 should_carryover,
                 &neuron_charge_buffer[((internal_timestep + 1) %
                                        tracked_timesteps_count) *
@@ -276,7 +276,7 @@ void Network::process_events(uint32_t time) {
         }
 
         uint8_t fired_mask[4] = {0};
-        __riscv_vsm_v_b8(fired_mask, fired, vector_length);
+        __riscv_vsm_v_b16(fired_mask, fired, vector_length);
         for (size_t j = 0; j < vector_length; j++) {
             if (!get_fired(fired_mask, j)) {
                 continue;
@@ -291,33 +291,36 @@ void Network::process_events(uint32_t time) {
                 size_t vector_length =
                     min((size_t)max_vector_length, num_outgoing - k);
 
-                vint8m1_t weights = __riscv_vle8_v_i8m1(
+                vfloat16m1_t weights = __riscv_vle16_v_f16m1(
                     &synapse_weight[i + j][k], vector_length);
-                vuint8m1_t delays = __riscv_vle8_v_u8m1(
+                vuint8mf2_t internal_delays = __riscv_vle8_v_u8mf2(
                     &synapse_delay[i + j][k], vector_length);
-                vuint16m2_t destinations =
-                    __riscv_vle16_v_u16m2(&synapse_to[i + j][k], vector_length);
+                vuint16m1_t delays =
+                    __riscv_vzext_vf2_u16m1(internal_delays, vector_length);
+                vuint16m1_t internal_destinations =
+                    __riscv_vle16_v_u16m1(&synapse_to[i + j][k], vector_length);
+                vuint32m2_t destinations = __riscv_vzext_vf2_u32m2(
+                    internal_destinations, vector_length);
 
-                vuint16m2_t indexes = __riscv_vwaddu_vx_u16m2(
-                    delays, (uint16_t)internal_timestep, vector_length);
-                indexes = __riscv_vremu_vx_u16m2(
+                vuint32m2_t indexes = __riscv_vwaddu_vx_u32m2(
+                    delays, (uint32_t)internal_timestep, vector_length);
+                indexes = __riscv_vremu_vx_u32m2(
                     indexes, tracked_timesteps_count, vector_length);
 
                 // vmadd.vx vd, rs1, vs2, vm | vd[i] = (x[rs1] * vd[i]) + vs2[i]
-                indexes =
-                    __riscv_vmadd_vx_u16m2(indexes, (uint16_t)allocation_size,
-                                           destinations, vector_length);
-                vuint32m4_t final_indexes = __riscv_vwmulu_vx_u32m4(
+                __riscv_vmadd_vx_u32m2(indexes, (uint32_t)allocation_size,
+                                       destinations, vector_length);
+                vuint64m4_t final_indexes = __riscv_vwmulu_vx_u64m4(
                     indexes, sizeof(*neuron_charge_buffer), vector_length);
 
-                vint8m1_t downstream_charges = __riscv_vloxei32_v_i8m1(
+                vfloat16m1_t downstream_charges = __riscv_vloxei64_v_f16m1(
                     neuron_charge_buffer, final_indexes, vector_length);
 
-                downstream_charges = __riscv_vadd_vv_i8m1(
+                downstream_charges = __riscv_vfadd_vv_f16m1(
                     downstream_charges, weights, vector_length);
 
-                __riscv_vsuxei32_v_i8m1(neuron_charge_buffer, final_indexes,
-                                        downstream_charges, vector_length);
+                __riscv_vsuxei64_v_f16m1(neuron_charge_buffer, final_indexes,
+                                         downstream_charges, vector_length);
             }
         }
     }
