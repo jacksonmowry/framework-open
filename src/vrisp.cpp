@@ -194,6 +194,14 @@ void Network::process_events(uint32_t time) {
     size_t internal_timestep =
         (current_timestep + time) % tracked_timesteps_count;
 
+    for (std::size_t i = 0; i < neuron_count; i++) {
+        printf(
+            "%f %f\n",
+            (double)
+                neuron_charge_buffer[internal_timestep * allocation_size + i],
+            (double)neuron_threshold[i]);
+    }
+
 #ifdef NO_SIMD
     for (size_t i = 0; i < neuron_count; i++) {
         if (neuron_charge_buffer[internal_timestep * allocation_size + i] <
