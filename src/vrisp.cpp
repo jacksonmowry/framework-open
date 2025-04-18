@@ -194,14 +194,6 @@ void Network::process_events(uint32_t time) {
     size_t internal_timestep =
         (current_timestep + time) % tracked_timesteps_count;
 
-    for (std::size_t i = 0; i < neuron_count; i++) {
-        printf(
-            "%f %f\n",
-            (double)
-                neuron_charge_buffer[internal_timestep * allocation_size + i],
-            (double)neuron_threshold[i]);
-    }
-
 #ifdef NO_SIMD
     for (size_t i = 0; i < neuron_count; i++) {
         if (neuron_charge_buffer[internal_timestep * allocation_size + i] <
@@ -309,18 +301,18 @@ void Network::process_events(uint32_t time) {
                     __riscv_vle16_v_u16m1(&synapse_to[i + j][k], vector_length);
                 vuint32m2_t destinations = __riscv_vzext_vf2_u32m2(
                     internal_destinations, vector_length);
-
                 vuint32m2_t indexes = __riscv_vwaddu_vx_u32m2(
                     delays, (uint32_t)internal_timestep, vector_length);
                 indexes = __riscv_vremu_vx_u32m2(
                     indexes, tracked_timesteps_count, vector_length);
 
                 // vmadd.vx vd, rs1, vs2, vm | vd[i] = (x[rs1] * vd[i]) + vs2[i]
-                __riscv_vmadd_vx_u32m2(indexes, (uint32_t)allocation_size,
-                                       destinations, vector_length);
+                indexes =
+                    __riscv_vmadd_vx_u32m2(indexes, (uint32_t)allocation_size,
+                                           destinations, vector_length);
+
                 vuint64m4_t final_indexes = __riscv_vwmulu_vx_u64m4(
                     indexes, sizeof(*neuron_charge_buffer), vector_length);
-
                 vfloat16m1_t downstream_charges = __riscv_vloxei64_v_f16m1(
                     neuron_charge_buffer, final_indexes, vector_length);
 
