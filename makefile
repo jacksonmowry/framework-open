@@ -25,6 +25,9 @@ FR_OBJ = obj/framework.o obj/processor_help.o obj/properties.o
 RISP_INC = include/risp.hpp
 RISP_OBJ = obj/risp.o obj/risp_static.o
 
+CRISP_INC = include/crisp.hpp
+CRISP_OBJ = obj/crisp.o obj/crisp_static.o
+
 VRISP_INC = include/vrisp.hpp
 VRISP_OBJ = obj/vrisp.o obj/vrisp_static.o
 VRISP_RVV_FULL_OBJ = obj/vrisp_rvv_full.o obj/vrisp_static.o
@@ -35,6 +38,7 @@ all: lib/libframework.a \
      bin/network_tool \
      bin/compose_networks \
      bin/processor_tool_risp \
+     bin/processor_tool_crisp \
      bin/processor_tool_vrisp \
      bin/network_to_jgraph \
 
@@ -69,6 +73,9 @@ bin/compose_networks: src/compose_networks.cpp $(FR_INC) $(FR_LIB)
 bin/processor_tool_risp: src/processor_tool.cpp $(FR_INC) $(RISP_INC) $(RISP_OBJ) $(FR_LIB)
 	$(CXX) $(FR_CFLAGS) -o bin/processor_tool_risp src/processor_tool.cpp $(RISP_OBJ) $(FR_LIB)
 
+bin/processor_tool_crisp: src/processor_tool.cpp $(FR_INC) $(CRISP_INC) $(CRISP_OBJ) $(FR_LIB)
+	$(CXX) $(FR_CFLAGS) -o bin/processor_tool_crisp src/processor_tool.cpp $(CRISP_OBJ) $(FR_LIB)
+
 bin/processor_tool_vrisp: src/processor_tool.cpp $(FR_INC) $(VRISP_INC) $(VRISP_OBJ) $(FR_LIB)
 	$(CXX) $(FR_CFLAGS) -o bin/processor_tool_vrisp src/processor_tool.cpp $(VRISP_OBJ) $(FR_LIB)
 
@@ -98,6 +105,12 @@ obj/risp.o: src/risp.cpp $(FR_INC) $(RISP_INC)
 
 obj/risp_static.o: src/risp_static.cpp $(FR_INC) $(RISP_INC)
 	$(CXX) -c $(FR_CFLAGS) -o obj/risp_static.o src/risp_static.cpp
+
+obj/crisp.o: src/crisp.cpp $(FR_INC) $(CRISP_INC)
+	$(CXX) -c $(FR_CFLAGS) -o obj/crisp.o src/crisp.cpp
+
+obj/crisp_static.o: src/crisp_static.cpp $(FR_INC) $(CRISP_INC)
+	$(CXX) -c $(FR_CFLAGS) -o obj/crisp_static.o src/crisp_static.cpp
 
 obj/vrisp.o: src/vrisp.cpp $(FR_INC) $(VRISP_INC)
 	$(CXX) -c $(FR_CFLAGS) -DNO_SIMD -o obj/vrisp.o src/vrisp.cpp
