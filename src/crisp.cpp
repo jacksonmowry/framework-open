@@ -245,7 +245,7 @@ Network::Network(neuro::Network* net, double _min_potential, char leak,
 
     so_file = "/tmp/libcrisp_" + to_string(rn) + ".so";
 
-    string command = "gcc -march=native -O3 -g3 -shared -fPIC " + c_file +
+    string command = "gcc -march=native -O3 -shared -fPIC " + c_file +
                      " -o /tmp/libcrisp_" + to_string(rn) + ".so";
     system(command.c_str());
 
